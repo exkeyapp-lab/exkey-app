@@ -22,8 +22,8 @@ export interface Profile {
   target_clients: string[];
   contact_level: ContactLevel;
   familiarity: Familiarity;
-  my_level: string | null;
-  seeking_levels: string[];
+  level: number | null;
+  seeking_level: number | null;
   view_count: number;
   interest_count: number;
   match_count: number;
@@ -39,8 +39,7 @@ export interface OnboardingData {
   name: string;
   company: string;
   bio: string;
-  my_level: string;
-  seeking_levels: string[];
+  seeking_level: number;
   line_id: string;
 }
 
@@ -56,12 +55,10 @@ export const REGIONS = [
   "台中", "台南", "高雄", "全台"
 ];
 
-// 職級選項（精簡 6 層）
+// 主管層級（用數字表示高低，方便「以上」比較）
+// 1=基層主管, 2=中層主管, 3=高層主管
 export const LEVELS = [
-  "負責人 / 高階主管",
-  "協理 / 處長 / 廠長",
-  "經理 / 副理",
-  "課長 / 主任 / 組長",
-  "工程師 / 專員",
-  "其他"
+  { value: 1, label: "基層主管", desc: "課長、主任、組長" },
+  { value: 2, label: "中層主管", desc: "經理、協理、廠長" },
+  { value: 3, label: "高層主管", desc: "總經理、總監、董事長" },
 ];

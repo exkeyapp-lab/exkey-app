@@ -42,12 +42,12 @@ function oneDirectionScore(
   );
 }
 
+type Recommendation = Profile & { score: number; mutual: boolean };
+
 export default function Discover() {
   const supabase = createClient();
   const [loading, setLoading] = useState(true);
-  const [recommendations, setRecommendations] = useState
-    (Profile & { score: number; mutual: boolean })[]
-  >([]);
+  const [recommendations, setRecommendations] = useState<Recommendation[]>([]);
   const [name, setName] = useState("");
   const [revealedId, setRevealedId] = useState<string | null>(null);
 

@@ -3,371 +3,566 @@
 import { useState } from "react";
 import { useRouter } from "next/navigation";
 import { createClient } from "@/lib/supabase";
-import { INDUSTRIES, REGIONS, LEVELS, type OnboardingData } from "@/lib/types";
+import {
+  INDUSTRIES,
+  REGIONS,
+  DEPARTMENTS,
+  JOB_LEVELS,
+  type OnboardingData,
+  type Role,
+  emptyOnboardingData,
+  mergedDepartments,
+} from "@/lib/types";
+
+type StepKey =
+  | "role"
+  | "basic"
+  | "seek_industry"
+  | "seek_region"
+  | "seek_department"
+  | "seek_level"
+  | "offer_intro"
+  | "offer_industry"
+  | "offer_region"
+  | "offer_department"
+  | "offer_level"
+  | "line_id";
+
+const BASE_STEPS: StepKey[] = [
+  "role",
+  "basic",
+  "seek_industry",
+  "seek_region",
+  "seek_department",
+  "seek_level",
+  "offer_intro",
+];
+const OFFER_STEPS: StepKey[] = [
+  "offer_industry",
+  "offer_region",
+  "offer_department",
+  "offer_level",
+];
+const FINAL_STEPS: StepKey[] = ["line_id"];
+
+const STEP_TITLES: Record<StepKey, string> = {
+  role: "選擇身份",
+  basic: "基本資料",
+  seek_industry: "想找的產業",
+  seek_region: "想找的地區",
+  seek_department: "想找的部門",
+  seek_level: "想找的職級",
+  offer_intro: "你能介紹的人脈",
+  offer_industry: "提供的產業",
+  offer_region: "提供的地區",
+  offer_department: "提供的部門",
+  offer_level: "提供的職級",
+  line_id: "聯絡方式",
+};
+
+// 共用的「多選 + 不限」欄位（產業／地區／部門 皆用這個畫面元件）
+function DimensionPicker({
+  title,
+  subtitle,
+  options,
+  selected,
+  onToggle,
+  onClear,
+  extra,
+}: {
+  title: string;
+  subtitle: string;
+  options: string[];
+  selected: string[];
+  onToggle: (v: string) => void;
+  onClear: () => void;
+  extra?: React.ReactNode;
+}) {
+  return (
+    <div>
+      <h1 className="text-2xl font-bold text-gray-900 mb-1">{title}</h1>
+      <p className="text-sm text-gray-500 mb-6">{subtitle}</p>
+      <div className="flex flex-wrap gap-2">
+        <button
+          onClick={onClear}
+          className={`px-4 py-2 rounded-full text-sm transition ${
+            selected.length === 0
+              ? "bg-purple-600 text-white"
+              : "bg-white border border-gray-200 text-gray-600 hover:border-purple-400"
+          }`}
+        >
+          不限
+        </button>
+        {options.map((opt) => (
+          <button
+            key={opt}
+            onClick={() => onToggle(opt)}
+            className={`px-4 py-2 rounded-full text-sm transition ${
+              selected.includes(opt)
+                ? "bg-purple-600 text-white"
+                : "bg-white border border-gray-200 text-gray-600 hover:border-purple-400"
+            }`}
+          >
+            {opt}
+          </button>
+        ))}
+      </div>
+      {extra}
+      <p className="text-sm text-gray-500 mt-4">
+        {selected.length === 0 ? "目前設定：不限" : `已選擇 ${selected.length} 項`}
+      </p>
+    </div>
+  );
+}
+
+// 共用的「職級門檻」畫面元件
+function LevelPicker({
+  title,
+  subtitle,
+  level,
+  onSelect,
+}: {
+  title: string;
+  subtitle: string;
+  level: number;
+  onSelect: (v: number) => void;
+}) {
+  return (
+    <div>
+      <h1 className="text-2xl font-bold text-gray-900 mb-1">{title}</h1>
+      <p className="text-sm text-gray-500 mb-6">{subtitle}</p>
+      <div className="space-y-3">
+        <button
+          onClick={() => onSelect(0)}
+          className={`w-full text-left p-4 rounded-xl border transition ${
+            level === 0
+              ? "border-purple-600 bg-purple-100"
+              : "border-gray-200 bg-white hover:border-purple-400"
+          }`}
+        >
+          <div className="font-semibold text-gray-900">不限</div>
+          <div className="text-sm text-gray-500">不確定或不設門檻</div>
+        </button>
+        {JOB_LEVELS.map((lv) => (
+          <button
+            key={lv.value}
+            onClick={() => onSelect(lv.value)}
+            className={`w-full text-left p-4 rounded-xl border transition ${
+              level === lv.value
+                ? "border-purple-600 bg-purple-100"
+                : "border-gray-200 bg-white hover:border-purple-400"
+            }`}
+          >
+            <div className="font-semibold text-gray-900">{lv.label}以上</div>
+            <div className="text-sm text-gray-500">{lv.desc}</div>
+          </button>
+        ))}
+      </div>
+    </div>
+  );
+}
 
 export default function Onboarding() {
   const router = useRouter();
   const supabase = createClient();
-  const [step, setStep] = useState(1);
+  const [data, setData] = useState<OnboardingData>(emptyOnboardingData());
+  const [stepIndex, setStepIndex] = useState(0);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
 
-  const [data, setData] = useState<OnboardingData>({
-    role: "", industries: [], regions: [], name: "", company: "",
-    bio: "", seeking_level: 0, line_id: "",
-  });
+  // 依「是否要填提供側」動態組出完整步驟序列
+  const steps: StepKey[] = data.hasOffer
+    ? [...BASE_STEPS, ...OFFER_STEPS, ...FINAL_STEPS]
+    : [...BASE_STEPS, ...FINAL_STEPS];
 
-  const totalSteps = 6;
+  const step = steps[stepIndex];
+  const totalSteps = steps.length;
 
-  function toggleArray(field: "industries" | "regions", value: string) {
+  function goNext() {
+    setStepIndex((i) => Math.min(i + 1, steps.length - 1));
+  }
+  function goBack() {
+    setStepIndex((i) => Math.max(i - 1, 0));
+  }
+
+  function toggleSeek(field: "industries" | "regions" | "departments", value: string) {
     setData((prev) => {
-      const arr = prev[field];
-      return { ...prev, [field]: arr.includes(value) ? arr.filter((v) => v !== value) : [...arr, value] };
+      const arr = prev.seek[field];
+      const next = arr.includes(value) ? arr.filter((v) => v !== value) : [...arr, value];
+      return { ...prev, seek: { ...prev.seek, [field]: next } };
+    });
+  }
+  function toggleOffer(field: "industries" | "regions" | "departments", value: string) {
+    setData((prev) => {
+      const arr = prev.offer[field];
+      const next = arr.includes(value) ? arr.filter((v) => v !== value) : [...arr, value];
+      return { ...prev, offer: { ...prev.offer, [field]: next } };
     });
   }
 
   async function handleSubmit() {
     setSaving(true);
     setError("");
+
+    const seekDepartments = mergedDepartments(data.seek);
+    const offerDepartments = data.hasOffer ? mergedDepartments(data.offer) : [];
+
     const { error: insertError } = await supabase.from("profiles").insert({
-      name: data.name, company: data.company || null, bio: data.bio || null,
-      line_id: data.line_id || null, role: data.role, industries: data.industries,
-      regions: data.regions, seeking_level: data.seeking_level || null,
-      contact_level: "middle", familiarity: "medium", is_active: true, is_verified: false,
+      name: data.name,
+      company: data.company || null,
+      bio: data.bio || null,
+      line_id: data.line_id || null,
+      role: data.role,
+
+      seek_industries: data.seek.industries,
+      seek_regions: data.seek.regions,
+      seek_departments: seekDepartments,
+      seek_level: data.seek.level || null,
+      seek_note: data.seek.note || null,
+
+      has_offer: data.hasOffer,
+      offer_industries: data.hasOffer ? data.offer.industries : [],
+      offer_regions: data.hasOffer ? data.offer.regions : [],
+      offer_departments: offerDepartments,
+      offer_level: data.hasOffer ? data.offer.level || null : null,
+      offer_note: data.hasOffer ? data.offer.note || null : null,
+
+      // 舊欄位：維持有值，避免踩到既有資料庫限制
+      industries: data.seek.industries,
+      regions: data.seek.regions,
+      contact_level: "middle",
+      familiarity: "medium",
+      is_active: true,
+      is_verified: false,
     });
+
     if (insertError) {
       setError("儲存失敗：" + insertError.message);
       setSaving(false);
       return;
     }
+
     sessionStorage.setItem("exkey_name", data.name);
     sessionStorage.setItem("exkey_role", data.role);
-    sessionStorage.setItem("exkey_industries", JSON.stringify(data.industries));
-    sessionStorage.setItem("exkey_regions", JSON.stringify(data.regions));
-    sessionStorage.setItem("exkey_seeking_level", String(data.seeking_level));
+    sessionStorage.setItem(
+      "exkey_seek",
+      JSON.stringify({
+        industries: data.seek.industries,
+        regions: data.seek.regions,
+        departments: seekDepartments,
+        level: data.seek.level,
+      })
+    );
+    sessionStorage.setItem("exkey_has_offer", String(data.hasOffer));
+    sessionStorage.setItem(
+      "exkey_offer",
+      JSON.stringify({
+        industries: data.hasOffer ? data.offer.industries : [],
+        regions: data.hasOffer ? data.offer.regions : [],
+        departments: offerDepartments,
+        level: data.hasOffer ? data.offer.level : 0,
+      })
+    );
     router.push("/discover");
   }
 
-  const titles = ["選擇身份", "選擇產業", "選擇地區", "基本資料", "想找的人脈", "聯絡方式"];
+  const nextDisabled =
+    (step === "role" && !data.role) ||
+    (step === "basic" && !data.name.trim()) ||
+    (step === "line_id" && (!data.line_id.trim() || saving));
 
   return (
     <main className="min-h-screen bg-purple-50 px-4 py-6">
       <div className="max-w-md mx-auto">
         <div className="flex items-center gap-2 mb-6">
-          <div className="w-8 h-8 bg-purple-600 rounded-full flex items-center justify-center text-white font-bold text-sm">EK</div>
+          <div className="w-8 h-8 bg-purple-600 rounded-full flex items-center justify-center text-white font-bold text-sm">
+            EK
+          </div>
           <span className="text-lg font-bold text-purple-900">ExKey</span>
         </div>
         <div className="mb-8">
           <div className="flex justify-between text-xs text-gray-500 mb-2">
-            <span>{titles[step - 1]}</span><span>{step} / {totalSteps}</span>
+            <span>{STEP_TITLES[step]}</span>
+            <span>
+              {stepIndex + 1} / {totalSteps}
+            </span>
           </div>
           <div className="h-1.5 bg-purple-100 rounded-full overflow-hidden">
-            <div className="h-full bg-purple-600 transition-all" style={{ width: `${(step / totalSteps) * 100}%` }} />
+            <div
+              className="h-full bg-purple-600 transition-all"
+              style={{ width: `${((stepIndex + 1) / totalSteps) * 100}%` }}
+            />
           </div>
         </div>
 
-        {step === 1 && (
+        {step === "role" && (
           <div>
             <h1 className="text-2xl font-bold text-gray-900 mb-1">你的身份是？</h1>
-            <p className="text-sm text-gray-500 mb-6">選擇最符合你的角色，幫助我們更精準媒合</p>
+            <p className="text-sm text-gray-500 mb-6">選擇最符合你的角色，作為基本資料顯示</p>
             <div className="space-y-3">
               {[
                 { v: "sales", t: "業務代理", d: "我有客戶通路，想找好產品代理" },
                 { v: "vendor", t: "產品廠商", d: "我有產品，想找業務夥伴拓展市場" },
                 { v: "both", t: "兩者皆是", d: "我同時有產品也有通路" },
               ].map((opt) => (
-                <button key={opt.v} onClick={() => setData({ ...data, role: opt.v as OnboardingData["role"] })}
-                  className={`w-full text-left p-4 rounded-xl border transition ${data.role === opt.v ? "border-purple-600 bg-purple-100" : "border-gray-200 bg-white hover:border-purple-400"}`}>
+                <button
+                  key={opt.v}
+                  onClick={() => setData({ ...data, role: opt.v as Role })}
+                  className={`w-full text-left p-4 rounded-xl border transition ${
+                    data.role === opt.v
+                      ? "border-purple-600 bg-purple-100"
+                      : "border-gray-200 bg-white hover:border-purple-400"
+                  }`}
+                >
                   <div className="font-semibold text-gray-900">{opt.t}</div>
                   <div className="text-sm text-gray-500">{opt.d}</div>
                 </button>
               ))}
             </div>
-            <button disabled={!data.role} onClick={() => setStep(2)} className="w-full mt-6 bg-purple-600 disabled:bg-gray-300 text-white font-medium py-3 rounded-xl transition">下一步</button>
           </div>
         )}
 
-        {step === 2 && (
-          <div>
-            <h1 className="text-2xl font-bold text-gray-900 mb-1">你的產業領域？</h1>
-            <p className="text-sm text-gray-500 mb-6">可多選，選擇你有經驗或想拓展的產業</p>
-            <div className="flex flex-wrap gap-2">
-              {INDUSTRIES.map((ind) => (
-                <button key={ind} onClick={() => toggleArray("industries", ind)}
-                  className={`px-4 py-2 rounded-full text-sm transition ${data.industries.includes(ind) ? "bg-purple-600 text-white" : "bg-white border border-gray-200 text-gray-600 hover:border-purple-400"}`}>{ind}</button>
-              ))}
-            </div>
-            <p className="text-sm text-gray-500 text-center mt-4">已選擇 {data.industries.length} 個產業</p>
-            <div className="flex gap-3 mt-6">
-              <button onClick={() => setStep(1)} className="px-6 py-3 rounded-xl border border-gray-200 text-gray-600">上一步</button>
-              <button disabled={data.industries.length === 0} onClick={() => setStep(3)} className="flex-1 bg-purple-600 disabled:bg-gray-300 text-white font-medium py-3 rounded-xl">下一步</button>
-            </div>
-          </div>
-        )}
-
-        {step === 3 && (
-          <div>
-            <h1 className="text-2xl font-bold text-gray-900 mb-1">你的服務地區？</h1>
-            <p className="text-sm text-gray-500 mb-6">可多選，選擇你能服務或希望拓展的地區</p>
-            <div className="flex flex-wrap gap-2">
-              {REGIONS.map((reg) => (
-                <button key={reg} onClick={() => toggleArray("regions", reg)}
-                  className={`px-4 py-2 rounded-full text-sm transition ${data.regions.includes(reg) ? "bg-purple-600 text-white" : "bg-white border border-gray-200 text-gray-600 hover:border-purple-400"}`}>{reg}</button>
-              ))}
-            </div>
-            <p className="text-sm text-gray-500 text-center mt-4">已選擇 {data.regions.length} 個地區</p>
-            <div className="flex gap-3 mt-6">
-              <button onClick={() => setStep(2)} className="px-6 py-3 rounded-xl border border-gray-200 text-gray-600">上一步</button>
-              <button disabled={data.regions.length === 0} onClick={() => setStep(4)} className="flex-1 bg-purple-600 disabled:bg-gray-300 text-white font-medium py-3 rounded-xl">下一步</button>
-            </div>
-          </div>
-        )}
-
-        {step === 4 && (
+        {step === "basic" && (
           <div>
             <h1 className="text-2xl font-bold text-gray-900 mb-1">讓大家認識你</h1>
             <p className="text-sm text-gray-500 mb-6">填寫基本資料，增加媒合成功率</p>
             <div className="space-y-4">
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-1">稱呼 *</label>
-                <input type="text" value={data.name} onChange={(e) => setData({ ...data, name: e.target.value })} placeholder="你的名字" className="w-full px-4 py-3 rounded-xl border border-gray-200 focus:border-purple-600 outline-none" />
+                <input
+                  type="text"
+                  value={data.name}
+                  onChange={(e) => setData({ ...data, name: e.target.value })}
+                  placeholder="你的名字"
+                  className="w-full px-4 py-3 rounded-xl border border-gray-200 focus:border-purple-600 outline-none"
+                />
               </div>
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-1">公司名稱（選填）</label>
-                <input type="text" value={data.company} onChange={(e) => setData({ ...data, company: e.target.value })} placeholder="例：台灣科技股份有限公司" className="w-full px-4 py-3 rounded-xl border border-gray-200 focus:border-purple-600 outline-none" />
+                <input
+                  type="text"
+                  value={data.company}
+                  onChange={(e) => setData({ ...data, company: e.target.value })}
+                  placeholder="例：台灣科技股份有限公司"
+                  className="w-full px-4 py-3 rounded-xl border border-gray-200 focus:border-purple-600 outline-none"
+                />
               </div>
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-1">一句話介紹自己（選填）</label>
-                <input type="text" value={data.bio} onChange={(e) => setData({ ...data, bio: e.target.value })} placeholder="例：10年半導體設備業務，竹科通路熟" className="w-full px-4 py-3 rounded-xl border border-gray-200 focus:border-purple-600 outline-none" />
+                <input
+                  type="text"
+                  value={data.bio}
+                  onChange={(e) => setData({ ...data, bio: e.target.value })}
+                  placeholder="例：10年半導體設備業務，竹科通路熟"
+                  className="w-full px-4 py-3 rounded-xl border border-gray-200 focus:border-purple-600 outline-none"
+                />
               </div>
             </div>
-            <div className="flex gap-3 mt-6">
-              <button onClick={() => setStep(3)} className="px-6 py-3 rounded-xl border border-gray-200 text-gray-600">上一步</button>
-              <button disabled={!data.name.trim()} onClick={() => setStep(5)} className="flex-1 bg-purple-600 disabled:bg-gray-300 text-white font-medium py-3 rounded-xl">下一步</button>
-            </div>
           </div>
         )}
 
-        {step === 5 && (
+        {step === "seek_industry" && (
+          <DimensionPicker
+            title="你想找的產業？"
+            subtitle="想認識哪些產業的人脈？不確定就選「不限」"
+            options={INDUSTRIES}
+            selected={data.seek.industries}
+            onToggle={(v) => toggleSeek("industries", v)}
+            onClear={() => setData((p) => ({ ...p, seek: { ...p.seek, industries: [] } }))}
+          />
+        )}
+
+        {step === "seek_region" && (
+          <DimensionPicker
+            title="你想找的地區？"
+            subtitle="想認識哪些地區的人脈？不確定就選「不限」"
+            options={REGIONS}
+            selected={data.seek.regions}
+            onToggle={(v) => toggleSeek("regions", v)}
+            onClear={() => setData((p) => ({ ...p, seek: { ...p.seek, regions: [] } }))}
+          />
+        )}
+
+        {step === "seek_department" && (
+          <DimensionPicker
+            title="你想找的部門？"
+            subtitle="想認識對方公司裡的哪個部門？不確定就選「不限」"
+            options={DEPARTMENTS}
+            selected={data.seek.departments}
+            onToggle={(v) => toggleSeek("departments", v)}
+            onClear={() => setData((p) => ({ ...p, seek: { ...p.seek, departments: [] } }))}
+            extra={
+              <input
+                type="text"
+                value={data.seek.customDepartment}
+                onChange={(e) =>
+                  setData((p) => ({ ...p, seek: { ...p.seek, customDepartment: e.target.value } }))
+                }
+                placeholder="其他部門（選填，自行輸入）"
+                className="w-full mt-3 px-4 py-2.5 rounded-xl border border-gray-200 focus:border-purple-600 outline-none text-sm"
+              />
+            }
+          />
+        )}
+
+        {step === "seek_level" && (
+          <LevelPicker
+            title="你想找的職級？"
+            subtitle="選一個門檻，這個職級以上都符合。不確定就選「不限」"
+            level={data.seek.level}
+            onSelect={(v) => setData((p) => ({ ...p, seek: { ...p.seek, level: v } }))}
+          />
+        )}
+
+        {step === "offer_intro" && (
           <div>
-            <h1 className="text-2xl font-bold text-gray-900 mb-1">你想接觸什麼層級的人脈？</h1>
-            <p className="text-sm text-gray-500 mb-6">選一個門檻，這個層級以上的人脈會排前面（不符合的還是會顯示）</p>
+            <h1 className="text-2xl font-bold text-gray-900 mb-1">你能介紹的人脈？</h1>
+            <p className="text-sm text-gray-500 mb-6">
+              這段完全自由，不確定或暫時沒有都可以跳過，之後隨時可以再補
+            </p>
             <div className="space-y-3">
-              {LEVELS.map((lv) => (
-                <button key={lv.value} onClick={() => setData({ ...data, seeking_level: data.seeking_level === lv.value ? 0 : lv.value })}
-                  className={`w-full text-left p-4 rounded-xl border transition ${data.seeking_level === lv.value ? "border-purple-600 bg-purple-100" : "border-gray-200 bg-white hover:border-purple-400"}`}>
-                  <div className="font-semibold text-gray-900">{lv.label}以上</div>
-                  <div className="text-sm text-gray-500">{lv.desc}</div>
-                </button>
-              ))}
-            </div>
-            <div className="flex gap-3 mt-6">
-              <button onClick={() => setStep(4)} className="px-6 py-3 rounded-xl border border-gray-200 text-gray-600">上一步</button>
-              <button onClick={() => setStep(6)} className="flex-1 bg-purple-600 text-white font-medium py-3 rounded-xl">下一步</button>
+              <button
+                onClick={() => {
+                  setData((p) => ({ ...p, hasOffer: true }));
+                  goNext();
+                }}
+                className="w-full text-left p-4 rounded-xl border border-purple-600 bg-purple-100"
+              >
+                <div className="font-semibold text-gray-900">好，我要填</div>
+                <div className="text-sm text-gray-500">例：我認識台積電採購課長</div>
+              </button>
+              <button
+                onClick={() => {
+                  setData((p) => ({ ...p, hasOffer: false }));
+                  goNext();
+                }}
+                className="w-full text-left p-4 rounded-xl border border-gray-200 bg-white hover:border-purple-400"
+              >
+                <div className="font-semibold text-gray-900">跳過，之後再填</div>
+                <div className="text-sm text-gray-500">只想找人脈，暫時沒有可以介紹的</div>
+              </button>
             </div>
           </div>
         )}
 
-        {step === 6 && (
+        {step === "offer_industry" && (
+          <DimensionPicker
+            title="你能介紹的產業？"
+            subtitle="你認識的人脈屬於哪些產業？不確定就選「不限」"
+            options={INDUSTRIES}
+            selected={data.offer.industries}
+            onToggle={(v) => toggleOffer("industries", v)}
+            onClear={() => setData((p) => ({ ...p, offer: { ...p.offer, industries: [] } }))}
+          />
+        )}
+
+        {step === "offer_region" && (
+          <DimensionPicker
+            title="你能介紹的地區？"
+            subtitle="你認識的人脈在哪些地區？不確定就選「不限」"
+            options={REGIONS}
+            selected={data.offer.regions}
+            onToggle={(v) => toggleOffer("regions", v)}
+            onClear={() => setData((p) => ({ ...p, offer: { ...p.offer, regions: [] } }))}
+          />
+        )}
+
+        {step === "offer_department" && (
+          <DimensionPicker
+            title="你能介紹的部門？"
+            subtitle="你認識的人脈在對方公司的哪個部門？不確定就選「不限」"
+            options={DEPARTMENTS}
+            selected={data.offer.departments}
+            onToggle={(v) => toggleOffer("departments", v)}
+            onClear={() => setData((p) => ({ ...p, offer: { ...p.offer, departments: [] } }))}
+            extra={
+              <input
+                type="text"
+                value={data.offer.customDepartment}
+                onChange={(e) =>
+                  setData((p) => ({ ...p, offer: { ...p.offer, customDepartment: e.target.value } }))
+                }
+                placeholder="其他部門（選填，自行輸入）"
+                className="w-full mt-3 px-4 py-2.5 rounded-xl border border-gray-200 focus:border-purple-600 outline-none text-sm"
+              />
+            }
+          />
+        )}
+
+        {step === "offer_level" && (
+          <LevelPicker
+            title="你能介紹的職級？"
+            subtitle="你認識的人脈職級大概到哪？不確定就選「不限」"
+            level={data.offer.level}
+            onSelect={(v) => setData((p) => ({ ...p, offer: { ...p.offer, level: v } }))}
+          />
+        )}
+
+        {step === "line_id" && (
           <div>
-            <div className="inline-block bg-gold-100 text-gold-900 text-xs px-3 py-1 rounded-full mb-3">✨ 最後一步</div>
+            <div className="inline-block bg-gold-100 text-gold-900 text-xs px-3 py-1 rounded-full mb-3">
+              ✨ 最後一步
+            </div>
             <h1 className="text-2xl font-bold text-gray-900 mb-1">留下聯絡方式</h1>
             <p className="text-sm text-gray-500 mb-6">配對成功後，對方可以透過 LINE 聯繫你</p>
             <div>
               <label className="block text-sm font-medium text-gray-700 mb-1">你的 LINE ID</label>
-              <input type="text" value={data.line_id} onChange={(e) => setData({ ...data, line_id: e.target.value })} placeholder="例：mike_chen_tw" className="w-full px-4 py-3 rounded-xl border border-gray-200 focus:border-purple-600 outline-none" />
+              <input
+                type="text"
+                value={data.line_id}
+                onChange={(e) => setData({ ...data, line_id: e.target.value })}
+                placeholder="例：mike_chen_tw"
+                className="w-full px-4 py-3 rounded-xl border border-gray-200 focus:border-purple-600 outline-none"
+              />
               <p className="text-xs text-gray-400 mt-1">在 LINE 的「設定 → 個人檔案 → ID」可以找到</p>
             </div>
             <div className="mt-6 p-4 bg-white rounded-xl border border-gray-100">
               <div className="font-semibold text-gray-900 mb-2">{data.name || "（未填名稱）"}</div>
               <div className="text-sm text-gray-500 mb-2">{data.company || "—"}</div>
               <div className="flex flex-wrap gap-1">
-                <span className="text-xs bg-purple-100 text-purple-900 px-2 py-1 rounded">{data.role === "sales" ? "業務" : data.role === "vendor" ? "廠商" : "兩者皆是"}</span>
-                <span className="text-xs bg-purple-100 text-purple-900 px-2 py-1 rounded">{data.industries.length} 個產業</span>
-                <span className="text-xs bg-purple-100 text-purple-900 px-2 py-1 rounded">{data.regions.length} 個地區</span>
+                <span className="text-xs bg-purple-100 text-purple-900 px-2 py-1 rounded">
+                  {data.role === "sales" ? "業務" : data.role === "vendor" ? "廠商" : "兩者皆是"}
+                </span>
+                <span className="text-xs bg-purple-100 text-purple-900 px-2 py-1 rounded">
+                  想找：{data.seek.industries.length === 0 ? "不限產業" : `${data.seek.industries.length} 個產業`}
+                </span>
+                <span className="text-xs bg-purple-100 text-purple-900 px-2 py-1 rounded">
+                  {data.hasOffer ? "已填寫可提供的人脈" : "尚未填寫可提供的人脈"}
+                </span>
               </div>
             </div>
             {error && <p className="text-sm text-red-600 mt-3">{error}</p>}
-            <div className="flex gap-3 mt-6">
-              <button onClick={() => setStep(5)} className="px-6 py-3 rounded-xl border border-gray-200 text-gray-600">上一步</button>
-              <button disabled={saving || !data.line_id.trim()} onClick={handleSubmit} className="flex-1 bg-gold-600 disabled:bg-gray-300 text-purple-900 font-semibold py-3 rounded-xl">
+          </div>
+        )}
+
+        <div className="flex gap-3 mt-6">
+          {stepIndex > 0 && (
+            <button
+              onClick={goBack}
+              className="px-6 py-3 rounded-xl border border-gray-200 text-gray-600"
+            >
+              上一步
+            </button>
+          )}
+          {step !== "offer_intro" &&
+            (step === "line_id" ? (
+              <button
+                disabled={nextDisabled || saving}
+                onClick={handleSubmit}
+                className="flex-1 bg-gold-600 disabled:bg-gray-300 text-purple-900 font-semibold py-3 rounded-xl"
+              >
                 {saving ? "儲存中..." : "註冊完成，馬上幫你找符合的人脈 →"}
               </button>
-            </div>
-          </div>
-        )}
-      </div>
-    </main>
-  );
-}    });
-    if (insertError) {
-      setError("儲存失敗：" + insertError.message);
-      setSaving(false);
-      return;
-    }
-    sessionStorage.setItem("exkey_name", data.name);
-    sessionStorage.setItem("exkey_role", data.role);
-    sessionStorage.setItem("exkey_industries", JSON.stringify(data.industries));
-    sessionStorage.setItem("exkey_regions", JSON.stringify(data.regions));
-    sessionStorage.setItem("exkey_seeking_levels", JSON.stringify(data.seeking_levels));
-    router.push("/discover");
-  }
-
-  const titles = ["選擇身份", "選擇產業", "選擇地區", "基本資料", "想找的人脈", "聯絡方式"];
-
-  return (
-    <main className="min-h-screen bg-purple-50 px-4 py-6">
-      <div className="max-w-md mx-auto">
-        <div className="flex items-center gap-2 mb-6">
-          <div className="w-8 h-8 bg-purple-600 rounded-full flex items-center justify-center text-white font-bold text-sm">EK</div>
-          <span className="text-lg font-bold text-purple-900">ExKey</span>
-        </div>
-        <div className="mb-8">
-          <div className="flex justify-between text-xs text-gray-500 mb-2">
-            <span>{titles[step - 1]}</span><span>{step} / {totalSteps}</span>
-          </div>
-          <div className="h-1.5 bg-purple-100 rounded-full overflow-hidden">
-            <div className="h-full bg-purple-600 transition-all" style={{ width: `${(step / totalSteps) * 100}%` }} />
-          </div>
-        </div>
-
-        {step === 1 && (
-          <div>
-            <h1 className="text-2xl font-bold text-gray-900 mb-1">你的身份是？</h1>
-            <p className="text-sm text-gray-500 mb-6">選擇最符合你的角色，幫助我們更精準媒合</p>
-            <div className="space-y-3">
-              {[
-                { v: "sales", t: "業務代理", d: "我有客戶通路，想找好產品代理" },
-                { v: "vendor", t: "產品廠商", d: "我有產品，想找業務夥伴拓展市場" },
-                { v: "both", t: "兩者皆是", d: "我同時有產品也有通路" },
-              ].map((opt) => (
-                <button key={opt.v} onClick={() => setData({ ...data, role: opt.v as OnboardingData["role"] })}
-                  className={`w-full text-left p-4 rounded-xl border transition ${data.role === opt.v ? "border-purple-600 bg-purple-100" : "border-gray-200 bg-white hover:border-purple-400"}`}>
-                  <div className="font-semibold text-gray-900">{opt.t}</div>
-                  <div className="text-sm text-gray-500">{opt.d}</div>
-                </button>
-              ))}
-            </div>
-            <button disabled={!data.role} onClick={() => setStep(2)} className="w-full mt-6 bg-purple-600 disabled:bg-gray-300 text-white font-medium py-3 rounded-xl transition">下一步</button>
-          </div>
-        )}
-
-        {step === 2 && (
-          <div>
-            <h1 className="text-2xl font-bold text-gray-900 mb-1">你的產業領域？</h1>
-            <p className="text-sm text-gray-500 mb-6">可多選，選擇你有經驗或想拓展的產業</p>
-            <div className="flex flex-wrap gap-2">
-              {INDUSTRIES.map((ind) => (
-                <button key={ind} onClick={() => toggleArray("industries", ind)}
-                  className={`px-4 py-2 rounded-full text-sm transition ${data.industries.includes(ind) ? "bg-purple-600 text-white" : "bg-white border border-gray-200 text-gray-600 hover:border-purple-400"}`}>{ind}</button>
-              ))}
-            </div>
-            <p className="text-sm text-gray-500 text-center mt-4">已選擇 {data.industries.length} 個產業</p>
-            <div className="flex gap-3 mt-6">
-              <button onClick={() => setStep(1)} className="px-6 py-3 rounded-xl border border-gray-200 text-gray-600">上一步</button>
-              <button disabled={data.industries.length === 0} onClick={() => setStep(3)} className="flex-1 bg-purple-600 disabled:bg-gray-300 text-white font-medium py-3 rounded-xl">下一步</button>
-            </div>
-          </div>
-        )}
-
-        {step === 3 && (
-          <div>
-            <h1 className="text-2xl font-bold text-gray-900 mb-1">你的服務地區？</h1>
-            <p className="text-sm text-gray-500 mb-6">可多選，選擇你能服務或希望拓展的地區</p>
-            <div className="flex flex-wrap gap-2">
-              {REGIONS.map((reg) => (
-                <button key={reg} onClick={() => toggleArray("regions", reg)}
-                  className={`px-4 py-2 rounded-full text-sm transition ${data.regions.includes(reg) ? "bg-purple-600 text-white" : "bg-white border border-gray-200 text-gray-600 hover:border-purple-400"}`}>{reg}</button>
-              ))}
-            </div>
-            <p className="text-sm text-gray-500 text-center mt-4">已選擇 {data.regions.length} 個地區</p>
-            <div className="flex gap-3 mt-6">
-              <button onClick={() => setStep(2)} className="px-6 py-3 rounded-xl border border-gray-200 text-gray-600">上一步</button>
-              <button disabled={data.regions.length === 0} onClick={() => setStep(4)} className="flex-1 bg-purple-600 disabled:bg-gray-300 text-white font-medium py-3 rounded-xl">下一步</button>
-            </div>
-          </div>
-        )}
-
-        {step === 4 && (
-          <div>
-            <h1 className="text-2xl font-bold text-gray-900 mb-1">讓大家認識你</h1>
-            <p className="text-sm text-gray-500 mb-6">填寫基本資料，增加媒合成功率</p>
-            <div className="space-y-4">
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">稱呼 *</label>
-                <input type="text" value={data.name} onChange={(e) => setData({ ...data, name: e.target.value })} placeholder="你的名字" className="w-full px-4 py-3 rounded-xl border border-gray-200 focus:border-purple-600 outline-none" />
-              </div>
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">公司名稱（選填）</label>
-                <input type="text" value={data.company} onChange={(e) => setData({ ...data, company: e.target.value })} placeholder="例：台灣科技股份有限公司" className="w-full px-4 py-3 rounded-xl border border-gray-200 focus:border-purple-600 outline-none" />
-              </div>
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">你的職級（選填）</label>
-                <div className="flex flex-wrap gap-2">
-                  {LEVELS.map((lv) => (
-                    <button key={lv} onClick={() => setData({ ...data, my_level: data.my_level === lv ? "" : lv })}
-                      className={`px-3 py-2 rounded-lg text-sm transition ${data.my_level === lv ? "bg-purple-600 text-white" : "bg-white border border-gray-200 text-gray-600 hover:border-purple-400"}`}>{lv}</button>
-                  ))}
-                </div>
-              </div>
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">一句話介紹自己（選填）</label>
-                <input type="text" value={data.bio} onChange={(e) => setData({ ...data, bio: e.target.value })} placeholder="例：10年半導體設備業務，竹科通路熟" className="w-full px-4 py-3 rounded-xl border border-gray-200 focus:border-purple-600 outline-none" />
-              </div>
-            </div>
-            <div className="flex gap-3 mt-6">
-              <button onClick={() => setStep(3)} className="px-6 py-3 rounded-xl border border-gray-200 text-gray-600">上一步</button>
-              <button disabled={!data.name.trim()} onClick={() => setStep(5)} className="flex-1 bg-purple-600 disabled:bg-gray-300 text-white font-medium py-3 rounded-xl">下一步</button>
-            </div>
-          </div>
-        )}
-
-        {step === 5 && (
-          <div>
-            <h1 className="text-2xl font-bold text-gray-900 mb-1">你想接觸什麼層級的人脈？</h1>
-            <p className="text-sm text-gray-500 mb-6">可多選。符合的人會排前面，不符合的還是會顯示喔</p>
-            <div className="flex flex-wrap gap-2">
-              {LEVELS.map((lv) => (
-                <button key={lv} onClick={() => toggleArray("seeking_levels", lv)}
-                  className={`px-3 py-2 rounded-lg text-sm transition ${data.seeking_levels.includes(lv) ? "bg-purple-600 text-white" : "bg-white border border-gray-200 text-gray-600 hover:border-purple-400"}`}>{lv}</button>
-              ))}
-            </div>
-            <p className="text-sm text-gray-500 text-center mt-4">已選擇 {data.seeking_levels.length} 個層級</p>
-            <div className="flex gap-3 mt-6">
-              <button onClick={() => setStep(4)} className="px-6 py-3 rounded-xl border border-gray-200 text-gray-600">上一步</button>
-              <button onClick={() => setStep(6)} className="flex-1 bg-purple-600 text-white font-medium py-3 rounded-xl">下一步</button>
-            </div>
-          </div>
-        )}
-
-        {step === 6 && (
-          <div>
-            <div className="inline-block bg-gold-100 text-gold-900 text-xs px-3 py-1 rounded-full mb-3">✨ 最後一步</div>
-            <h1 className="text-2xl font-bold text-gray-900 mb-1">留下聯絡方式</h1>
-            <p className="text-sm text-gray-500 mb-6">配對成功後，對方可以透過 LINE 聯繫你</p>
-            <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">你的 LINE ID</label>
-              <input type="text" value={data.line_id} onChange={(e) => setData({ ...data, line_id: e.target.value })} placeholder="例：mike_chen_tw" className="w-full px-4 py-3 rounded-xl border border-gray-200 focus:border-purple-600 outline-none" />
-              <p className="text-xs text-gray-400 mt-1">在 LINE 的「設定 → 個人檔案 → ID」可以找到</p>
-            </div>
-            <div className="mt-6 p-4 bg-white rounded-xl border border-gray-100">
-              <div className="font-semibold text-gray-900 mb-2">{data.name || "（未填名稱）"}</div>
-              <div className="text-sm text-gray-500 mb-2">{data.company || "—"}{data.my_level ? `・${data.my_level}` : ""}</div>
-              <div className="flex flex-wrap gap-1">
-                <span className="text-xs bg-purple-100 text-purple-900 px-2 py-1 rounded">{data.role === "sales" ? "業務" : data.role === "vendor" ? "廠商" : "兩者皆是"}</span>
-                <span className="text-xs bg-purple-100 text-purple-900 px-2 py-1 rounded">{data.industries.length} 個產業</span>
-                <span className="text-xs bg-purple-100 text-purple-900 px-2 py-1 rounded">{data.regions.length} 個地區</span>
-              </div>
-            </div>
-            {error && <p className="text-sm text-red-600 mt-3">{error}</p>}
-            <div className="flex gap-3 mt-6">
-              <button onClick={() => setStep(5)} className="px-6 py-3 rounded-xl border border-gray-200 text-gray-600">上一步</button>
-              <button disabled={saving || !data.line_id.trim()} onClick={handleSubmit} className="flex-1 bg-gold-600 disabled:bg-gray-300 text-purple-900 font-semibold py-3 rounded-xl">
-                {saving ? "儲存中..." : "註冊完成，馬上幫你找符合的人脈 →"}
+            ) : (
+              <button
+                disabled={nextDisabled}
+                onClick={goNext}
+                className="flex-1 bg-purple-600 disabled:bg-gray-300 text-white font-medium py-3 rounded-xl"
+              >
+                下一步
               </button>
-            </div>
-          </div>
-        )}
+            ))}
+        </div>
       </div>
     </main>
   );

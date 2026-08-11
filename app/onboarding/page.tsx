@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { useRouter } from "next/navigation";
 import { createClient } from "@/lib/supabase";
 import {
@@ -169,6 +169,18 @@ export default function Onboarding() {
   const [stepIndex, setStepIndex] = useState(0);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
+  const [userId, setUserId] = useState<string | null>(null);
+
+  // 未登入者導回登入頁；已登入則記住帳號 ID，寫入資料時綁定
+  useEffect(() => {
+    supabase.auth.getUser().then(({ data }) => {
+      if (!data.user) {
+        router.replace("/login");
+        return;
+      }
+      setUserId(data.user.id);
+    });
+  }, []);
 
   // 依「是否要填提供側」動態組出完整步驟序列
   const steps: StepKey[] = data.hasOffer
@@ -208,6 +220,7 @@ export default function Onboarding() {
     const offerDepartments = data.hasOffer ? mergedDepartments(data.offer) : [];
 
     const { error: insertError } = await supabase.from("profiles").insert({
+      user_id: userId,
       name: data.name,
       company: data.company || null,
       bio: data.bio || null,

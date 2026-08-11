@@ -115,7 +115,7 @@ function DimensionPicker({
   );
 }
 
-// 共用的「職級門檻」畫面元件
+// 共用的「職級」畫面元件
 function LevelPicker({
   title,
   subtitle,
@@ -153,7 +153,7 @@ function LevelPicker({
                 : "border-gray-200 bg-white hover:border-purple-400"
             }`}
           >
-            <div className="font-semibold text-gray-900">{lv.label}以上</div>
+            <div className="font-semibold text-gray-900">{lv.label}</div>
             <div className="text-sm text-gray-500">{lv.desc}</div>
           </button>
         ))}
@@ -408,7 +408,7 @@ export default function Onboarding() {
         {step === "seek_level" && (
           <LevelPicker
             title="你想找的職級？"
-            subtitle="選一個門檻，這個職級以上都符合。不確定就選「不限」"
+            subtitle="想認識哪個職級的人脈？不確定就選「不限」"
             level={data.seek.level}
             onSelect={(v) => setData((p) => ({ ...p, seek: { ...p.seek, level: v } }))}
           />

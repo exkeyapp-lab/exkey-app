@@ -8,9 +8,9 @@ export type ContactLevel = "junior" | "middle" | "senior";
 export type Familiarity = "light" | "medium" | "deep";
 
 // ==================== 職級（四層） ====================
-// 4=董事長級, 3=經理級, 2=課長級, 1=專員級, 0=不限
+// 4=高階主管, 3=經理級, 2=課長級, 1=專員級, 0=不限
 export const JOB_LEVELS = [
-  { value: 4, label: "董事長級", desc: "董事長、總經理、總監等最高層" },
+  { value: 4, label: "高階主管", desc: "董事長、總經理、總監等高階主管" },
   { value: 3, label: "經理級", desc: "經理、副理、廠長等中高層" },
   { value: 2, label: "課長級", desc: "課長、主任、組長等基層主管" },
   { value: 1, label: "專員級", desc: "專員、工程師、技術員等一般職" },
@@ -124,3 +124,11 @@ export function emptyOnboardingData(): OnboardingData {
     line_id: "",
   };
 }
+// ==================== 公開查詢用（不含 line_id） ====================
+// discover 頁改用逐欄查詢，line_id 不再隨整包資料送到瀏覽器
+export const PUBLIC_PROFILE_COLUMNS =
+  "id, name, company, bio, role, has_offer, is_verified, is_active, " +
+  "offer_industries, offer_regions, offer_departments, offer_level, " +
+  "seek_industries, seek_regions, seek_departments, seek_level";
+
+export type PublicProfile = Omit<Profile, "line_id">;

@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useEffect } from "react";
+import { useRouter } from "next/navigation";
 import { createClient } from "@/lib/supabase";
 import { levelLabel, PUBLIC_PROFILE_COLUMNS, type PublicProfile } from "@/lib/types";
 
@@ -9,10 +10,6 @@ interface SideSnapshot {
   regions: string[];
   departments: string[];
   level: number;
-}
-
-function emptySide(): SideSnapshot {
-  return { industries: [], regions: [], departments: [], level: 0 };
 }
 
 // 單一維度計分：seekList 為空 = 不限，不計分也不扣分
@@ -42,6 +39,23 @@ function oneDirectionScore(
   );
 }
 
+function sideFromProfile(p: PublicProfile, which: "seek" | "offer"): SideSnapshot {
+  if (which === "seek") {
+    return {
+      industries: p.seek_industries || [],
+      regions: p.seek_regions || [],
+      departments: p.seek_departments || [],
+      level: p.seek_level ?? 0,
+    };
+  }
+  return {
+    industries: p.offer_industries || [],
+    regions: p.offer_regions || [],
+    departments: p.offer_departments || [],
+    level: p.offer_level ?? 0,
+  };
+}
+
 type Recommendation = PublicProfile & { score: number; mutual: boolean };
 
 // 每張卡片的解鎖狀態
@@ -53,30 +67,42 @@ type UnlockState =
   | { stage: "error" };
 
 export default function Discover() {
+  const router = useRouter();
   const supabase = createClient();
   const [loading, setLoading] = useState(true);
+  const [noProfile, setNoProfile] = useState(false);
   const [recommendations, setRecommendations] = useState<Recommendation[]>([]);
   const [name, setName] = useState("");
   const [unlocks, setUnlocks] = useState<Record<string, UnlockState>>({});
 
   useEffect(() => {
     async function load() {
-      const myName = sessionStorage.getItem("exkey_name") || "";
-      setName(myName);
+      // 未登入者導回登入頁
+      const { data: userData } = await supabase.auth.getUser();
+      if (!userData.user) {
+        router.replace("/login");
+        return;
+      }
+      const uid = userData.user.id;
 
-      let mySeek: SideSnapshot = emptySide();
-      let myOffer: SideSnapshot = emptySide();
-      try {
-        mySeek = { ...emptySide(), ...JSON.parse(sessionStorage.getItem("exkey_seek") || "{}") };
-      } catch {
-        mySeek = emptySide();
+      // 讀取自己的檔案作為配對條件（單一資料來源，不再依賴瀏覽器暫存）
+      const { data: mine } = await supabase
+        .from("profiles")
+        .select(PUBLIC_PROFILE_COLUMNS)
+        .eq("user_id", uid)
+        .order("created_at", { ascending: false })
+        .limit(1);
+
+      if (!mine || mine.length === 0) {
+        setNoProfile(true);
+        setLoading(false);
+        return;
       }
-      try {
-        myOffer = { ...emptySide(), ...JSON.parse(sessionStorage.getItem("exkey_offer") || "{}") };
-      } catch {
-        myOffer = emptySide();
-      }
-      const myHasOffer = sessionStorage.getItem("exkey_has_offer") === "true";
+      const me = mine[0] as unknown as PublicProfile;
+      setName(me.name);
+      const mySeek = sideFromProfile(me, "seek");
+      const myOffer = sideFromProfile(me, "offer");
+      const myHasOffer = me.has_offer;
 
       const { data, error } = await supabase
         .from("profiles")
@@ -88,33 +114,15 @@ export default function Discover() {
       }
 
       const scored = (data as unknown as PublicProfile[])
-        .filter((p) => p.name !== myName)
+        .filter((p) => p.id !== me.id && p.user_id !== uid)
         .map((p) => {
           // 主方向：我想找 vs 對方提供
-          const primary = oneDirectionScore(mySeek, {
-            industries: p.offer_industries || [],
-            regions: p.offer_regions || [],
-            departments: p.offer_departments || [],
-            level: p.offer_level,
-          });
+          const primary = oneDirectionScore(mySeek, sideFromProfile(p, "offer"));
 
           // 反方向：對方想找 vs 我提供（只有我有填提供側時才計算，達成「雙向互補」加分）
           let secondary = 0;
           if (myHasOffer) {
-            secondary = oneDirectionScore(
-              {
-                industries: p.seek_industries || [],
-                regions: p.seek_regions || [],
-                departments: p.seek_departments || [],
-                level: p.seek_level ?? 0,
-              },
-              {
-                industries: myOffer.industries,
-                regions: myOffer.regions,
-                departments: myOffer.departments,
-                level: myOffer.level,
-              }
-            );
+            secondary = oneDirectionScore(sideFromProfile(p, "seek"), myOffer);
           }
 
           return { ...p, score: primary + secondary, mutual: primary > 0 && secondary > 0 };
@@ -146,11 +154,16 @@ export default function Discover() {
   return (
     <main className="min-h-screen bg-purple-50 px-4 py-6">
       <div className="max-w-md mx-auto">
-        <div className="flex items-center gap-2 mb-6">
-          <div className="w-8 h-8 bg-purple-600 rounded-full flex items-center justify-center text-white font-bold text-sm">
-            EK
+        <div className="flex items-center justify-between mb-6">
+          <div className="flex items-center gap-2">
+            <div className="w-8 h-8 bg-purple-600 rounded-full flex items-center justify-center text-white font-bold text-sm">
+              EK
+            </div>
+            <span className="text-lg font-bold text-purple-900">ExKey</span>
           </div>
-          <span className="text-lg font-bold text-purple-900">ExKey</span>
+          <button onClick={() => router.push("/member")} className="text-sm text-gray-500 underline">
+            會員專區
+          </button>
         </div>
 
         <h1 className="text-2xl font-bold text-gray-900 mb-1">{name ? `${name}，為你推薦` : "推薦人脈"}</h1>
@@ -159,7 +172,20 @@ export default function Discover() {
         </p>
 
         {loading && <div className="text-center py-12 text-gray-400">載入中...</div>}
-        {!loading && recommendations.length === 0 && (
+
+        {!loading && noProfile && (
+          <div className="bg-white rounded-2xl border border-gray-100 p-6 shadow-sm text-center">
+            <p className="text-gray-600 mb-4">先建立你的人脈檔案，才能為你配對</p>
+            <button
+              onClick={() => router.push("/onboarding")}
+              className="w-full bg-purple-600 text-white font-medium py-3 rounded-xl"
+            >
+              開始建立 →
+            </button>
+          </div>
+        )}
+
+        {!loading && !noProfile && recommendations.length === 0 && (
           <div className="text-center py-12 text-gray-400">
             目前還沒有適合的推薦，
             <br />
@@ -221,7 +247,7 @@ export default function Discover() {
                           {v}
                         </span>
                       ))}
-                      {p.offer_level != null && (
+                      {p.offer_level != null && p.offer_level > 0 && (
                         <span className="text-xs bg-gold-50 text-gold-900 px-2 py-1 rounded border border-gold-100">
                           {levelLabel(p.offer_level)}
                         </span>
@@ -238,7 +264,7 @@ export default function Discover() {
                     {(p.seek_industries || []).length === 0 &&
                     (p.seek_regions || []).length === 0 &&
                     (p.seek_departments || []).length === 0 &&
-                    p.seek_level == null ? (
+                    (p.seek_level == null || p.seek_level === 0) ? (
                       <span className="text-xs text-gray-400">不限</span>
                     ) : (
                       <>
@@ -260,7 +286,7 @@ export default function Discover() {
                             {v}
                           </span>
                         ))}
-                        {p.seek_level != null && (
+                        {p.seek_level != null && p.seek_level > 0 && (
                           <span className="text-xs bg-gold-50 text-gold-900 px-2 py-1 rounded border border-gold-100">
                             {levelLabel(p.seek_level)}
                           </span>
@@ -283,7 +309,7 @@ export default function Discover() {
                   <div className="bg-purple-50 border border-purple-100 rounded-xl p-3">
                     <div className="text-sm font-medium text-gray-900 mb-1">解鎖 {p.name} 的聯絡方式</div>
                     <p className="text-xs text-gray-500 mb-3">
-                      正式版將採會員點數制。<span className="font-medium text-purple-600">內測期間免費解鎖</span>，解鎖紀錄會保留。
+                      正式版將採付費會員制。<span className="font-medium text-purple-600">內測期間免費解鎖</span>，解鎖紀錄會保留。
                     </p>
                     <div className="flex gap-2">
                       <button

@@ -33,7 +33,7 @@ export default function Home() {
           {/* CTAs */}
           <div className="flex flex-col sm:flex-row gap-3 justify-center">
             <Link
-              href="/onboarding"
+              href="/login"
               className="bg-gold-600 hover:bg-gold-400 text-purple-900 font-semibold px-8 py-4 rounded-full transition shadow-lg"
             >
               免費開始媒合 →
@@ -114,7 +114,7 @@ export default function Home() {
           {/* 底部 CTA */}
           <div className="text-center mt-12">
             <Link
-              href="/onboarding"
+              href="/login"
               className="inline-block bg-purple-600 hover:bg-purple-400 text-white font-semibold px-10 py-4 rounded-full transition shadow-lg"
             >
               立即免費開始 →

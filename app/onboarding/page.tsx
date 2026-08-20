@@ -237,7 +237,16 @@ export default function Onboarding() {
           }
           uid = signInData.user?.id ?? null;
         } else {
-          setError("帳號建立失敗：" + signUpErr.message);
+                   const m = signUpErr.message.toLowerCase();
+          let reason = signUpErr.message;
+          if (m.includes("rate limit") || m.includes("security purposes")) {
+            reason = "短時間內嘗試次數過多，請等幾分鐘再送出（你填的資料都還在）";
+          } else if (m.includes("invalid")) {
+            reason = "Email 格式不正確，請檢查後再試";
+          } else if (m.includes("password")) {
+            reason = "密碼不符合要求，請設定至少 6 個字元";
+          }
+          setError("帳號建立失敗：" + reason);
           setSaving(false);
           return;
         }

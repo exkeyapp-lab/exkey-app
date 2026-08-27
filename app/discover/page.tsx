@@ -64,7 +64,10 @@ type UnlockState =
   | { stage: "confirm" }
   | { stage: "loading" }
   | { stage: "revealed"; lineId: string }
+  | { stage: "nopoints" }
   | { stage: "error" };
+
+const UNLOCK_COST = 10;
 
 export default function Discover() {
   const router = useRouter();
@@ -74,6 +77,12 @@ export default function Discover() {
   const [recommendations, setRecommendations] = useState<Recommendation[]>([]);
   const [name, setName] = useState("");
   const [unlocks, setUnlocks] = useState<Record<string, UnlockState>>({});
+  const [points, setPoints] = useState<number | null>(null);
+
+  async function refreshWallet() {
+    const { data } = await supabase.rpc("get_my_wallet");
+    if (data && typeof data.points === "number") setPoints(data.points);
+  }
 
   useEffect(() => {
     async function load() {
@@ -100,6 +109,7 @@ export default function Discover() {
       }
       const me = mine[0] as unknown as PublicProfile;
       setName(me.name);
+      refreshWallet();
       const mySeek = sideFromProfile(me, "seek");
       const myOffer = sideFromProfile(me, "offer");
       const myHasOffer = me.has_offer;
@@ -145,10 +155,15 @@ export default function Discover() {
     setUnlock(id, { stage: "loading" });
     const { data, error } = await supabase.rpc("reveal_line_id", { target_id: id });
     if (error) {
-      setUnlock(id, { stage: "error" });
+      if (error.message.includes("NO_POINTS")) {
+        setUnlock(id, { stage: "nopoints" });
+      } else {
+        setUnlock(id, { stage: "error" });
+      }
       return;
     }
     setUnlock(id, { stage: "revealed", lineId: (data as string | null) || "" });
+    refreshWallet();
   }
 
   return (
@@ -161,9 +176,16 @@ export default function Discover() {
             </div>
             <span className="text-lg font-bold text-purple-900">ExKey</span>
           </div>
-          <button onClick={() => router.push("/member")} className="text-sm text-gray-500 underline">
-            會員專區
-          </button>
+          <div className="flex items-center gap-3">
+            {points != null && (
+              <span className="text-xs bg-gold-100 text-gold-900 px-3 py-1 rounded-full font-semibold">
+                {points} 點
+              </span>
+            )}
+            <button onClick={() => router.push("/member")} className="text-sm text-gray-500 underline">
+              會員專區
+            </button>
+          </div>
         </div>
 
         <h1 className="text-2xl font-bold text-gray-900 mb-1">{name ? `${name}，為你推薦` : "推薦人脈"}</h1>
@@ -309,7 +331,9 @@ export default function Discover() {
                   <div className="bg-purple-50 border border-purple-100 rounded-xl p-3">
                     <div className="text-sm font-medium text-gray-900 mb-1">解鎖 {p.name} 的聯絡方式</div>
                     <p className="text-xs text-gray-500 mb-3">
-                      正式版將採付費會員制。<span className="font-medium text-purple-600">內測期間免費解鎖</span>，解鎖紀錄會保留。
+                      解鎖需 <span className="font-semibold text-purple-600">{UNLOCK_COST} 點</span>
+                      {points != null && <>，你目前有 <span className="font-semibold text-purple-600">{points} 點</span></>}
+                      。解鎖過的對象之後免費查看，不重複扣點。
                     </p>
                     <div className="flex gap-2">
                       <button
@@ -322,7 +346,7 @@ export default function Discover() {
                         onClick={() => handleUnlock(p.id)}
                         className="flex-1 bg-gold-600 text-purple-900 font-semibold py-2 rounded-lg text-sm"
                       >
-                        免費解鎖
+                        確認解鎖（扣 {UNLOCK_COST} 點）
                       </button>
                     </div>
                   </div>
@@ -346,6 +370,15 @@ export default function Discover() {
                     >
                       複製
                     </button>
+                  </div>
+                )}
+
+                {unlock.stage === "nopoints" && (
+                  <div className="bg-gold-50 border border-gold-100 rounded-xl p-3">
+                    <p className="text-sm font-medium text-gray-900 mb-1">點數不足</p>
+                    <p className="text-xs text-gray-500">
+                      解鎖需 {UNLOCK_COST} 點。加值方式請洽平台管理員，完成後點數會直接加入你的帳戶。
+                    </p>
                   </div>
                 )}
 

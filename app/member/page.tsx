@@ -11,6 +11,8 @@ export default function Member() {
   const [loading, setLoading] = useState(true);
   const [email, setEmail] = useState("");
   const [profile, setProfile] = useState<PublicProfile | null>(null);
+  const [points, setPoints] = useState<number | null>(null);
+  const [unlockedTimes, setUnlockedTimes] = useState<number | null>(null);
 
   useEffect(() => {
     async function load() {
@@ -29,6 +31,12 @@ export default function Member() {
         .limit(1);
 
       setProfile(data && data.length > 0 ? (data[0] as unknown as PublicProfile) : null);
+
+      const { data: wallet } = await supabase.rpc("get_my_wallet");
+      if (wallet) {
+        if (typeof wallet.points === "number") setPoints(wallet.points);
+        if (typeof wallet.unlocked_times === "number") setUnlockedTimes(wallet.unlocked_times);
+      }
       setLoading(false);
     }
     load();
@@ -130,6 +138,17 @@ export default function Member() {
                 {profile.company ? `・${profile.company}` : ""}
               </div>
               {profile.bio && <p className="text-sm text-gray-600 mt-2">{profile.bio}</p>}
+            </div>
+
+            <div className="grid grid-cols-2 gap-4">
+              <div className="bg-white rounded-2xl border border-gray-100 p-4 shadow-sm text-center">
+                <div className="text-2xl font-bold text-gold-900">{points ?? "—"}</div>
+                <div className="text-xs text-gray-400 mt-1">點數餘額</div>
+              </div>
+              <div className="bg-white rounded-2xl border border-gray-100 p-4 shadow-sm text-center">
+                <div className="text-2xl font-bold text-purple-600">{unlockedTimes ?? "—"}</div>
+                <div className="text-xs text-gray-400 mt-1">檔案被解鎖次數</div>
+              </div>
             </div>
 
             <div className="bg-white rounded-2xl border border-gray-100 p-4 shadow-sm">

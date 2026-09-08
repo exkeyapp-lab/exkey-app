@@ -1,5 +1,6 @@
 import type { Metadata } from "next";
 import "./globals.css";
+import PageViewTracker from "./PageViewTracker";
 
 export const metadata: Metadata = {
   title: "ExKey · 關鍵人脈媒合平台",
@@ -14,6 +15,7 @@ export default function RootLayout({
   return (
     <html lang="zh-TW">
       <body className="font-sans bg-purple-50 text-gray-900 min-h-screen">
+        <PageViewTracker />
         {children}
       </body>
     </html>

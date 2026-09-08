@@ -4,7 +4,15 @@ export default function Home() {
   return (
     <main className="min-h-screen bg-purple-50">
       {/* Hero 區塊 */}
-      <section className="bg-gradient-to-br from-purple-600 to-purple-900 text-white px-6 py-16">
+           <section className="bg-gradient-to-br from-purple-600 to-purple-900 text-white px-6 py-16">
+        <div className="max-w-2xl mx-auto flex justify-end mb-2">
+          <Link
+            href="/login"
+            className="text-sm text-purple-100 hover:text-white underline underline-offset-4"
+          >
+            會員登入
+          </Link>
+        </div>
         <div className="max-w-2xl mx-auto text-center">
           {/* Logo */}
           <div className="flex items-center justify-center gap-2 mb-8">

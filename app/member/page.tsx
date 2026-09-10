@@ -14,6 +14,7 @@ export default function Member() {
   const [profile, setProfile] = useState<PublicProfile | null>(null);
   const [points, setPoints] = useState<number | null>(null);
   const [unlockedTimes, setUnlockedTimes] = useState<number | null>(null);
+  const [isAdmin, setIsAdmin] = useState(false);
 
   useEffect(() => {
     async function load() {
@@ -32,6 +33,9 @@ export default function Member() {
         .limit(1);
 
       setProfile(data && data.length > 0 ? (data[0] as unknown as PublicProfile) : null);
+
+      const { data: adm } = await supabase.rpc("am_i_admin");
+      if (adm === true) setIsAdmin(true);
 
       const { data: wallet } = await supabase.rpc("get_my_wallet");
       if (wallet) {
@@ -105,9 +109,19 @@ export default function Member() {
             </div>
             <span className="text-lg font-bold text-purple-900">ExKey</span>
           </Link>
-          <button onClick={handleLogout} className="text-sm text-gray-500 underline">
-            登出
-          </button>
+          <div className="flex items-center gap-3">
+            {isAdmin && (
+              <button
+                onClick={() => router.push("/admin")}
+                className="text-sm text-purple-600 underline"
+              >
+                管理後台
+              </button>
+            )}
+            <button onClick={handleLogout} className="text-sm text-gray-500 underline">
+              登出
+            </button>
+          </div>
         </div>
 
         <h1 className="text-2xl font-bold text-gray-900 mb-1">會員專區</h1>

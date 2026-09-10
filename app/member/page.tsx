@@ -2,6 +2,7 @@
 
 import { useState, useEffect } from "react";
 import { useRouter } from "next/navigation";
+import Link from "next/link";
 import { createClient } from "@/lib/supabase";
 import { levelLabel, PUBLIC_PROFILE_COLUMNS, type PublicProfile } from "@/lib/types";
 
@@ -98,12 +99,12 @@ export default function Member() {
     <main className="min-h-screen bg-purple-50 px-4 py-6">
       <div className="max-w-md mx-auto">
         <div className="flex items-center justify-between mb-6">
-          <div className="flex items-center gap-2">
+          <Link href="/" className="flex items-center gap-2">
             <div className="w-8 h-8 bg-purple-600 rounded-full flex items-center justify-center text-white font-bold text-sm">
               EK
             </div>
             <span className="text-lg font-bold text-purple-900">ExKey</span>
-          </div>
+          </Link>
           <button onClick={handleLogout} className="text-sm text-gray-500 underline">
             登出
           </button>

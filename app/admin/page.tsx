@@ -127,7 +127,25 @@ export default function Admin() {
     loadAll();
   }
 
-  const recentDays = overview ? overview.daily.slice(-14) : [];
+  // 產出「最近 14 個日曆天」的連續日期串，沒有註冊的日子補 0，
+  // 避免長條圖只畫有資料的日期、日期軸斷裂
+  function lastNDays(n: number): string[] {
+    const out: string[] = [];
+    const now = new Date();
+    for (let i = n - 1; i >= 0; i--) {
+      const d = new Date(now.getFullYear(), now.getMonth(), now.getDate() - i);
+      const mm = String(d.getMonth() + 1).padStart(2, "0");
+      const dd = String(d.getDate()).padStart(2, "0");
+      out.push(`${d.getFullYear()}-${mm}-${dd}`);
+    }
+    return out;
+  }
+
+  const countByDay = new Map((overview ? overview.daily : []).map((d) => [d.day, d.count]));
+  const recentDays: DailyCount[] = lastNDays(14).map((day) => ({
+    day,
+    count: countByDay.get(day) ?? 0,
+  }));
   const maxCount = Math.max(1, ...recentDays.map((d) => d.count));
 
   return (
@@ -180,12 +198,14 @@ export default function Admin() {
                 <div className="flex items-end gap-1 h-36">
                   {recentDays.map((d) => (
                     <div key={d.day} className="flex-1 flex flex-col items-center justify-end h-full">
-                      <div className="text-[10px] text-gray-500 mb-0.5">{d.count}</div>
+                      <div className="text-[10px] text-gray-500 mb-0.5">{d.count > 0 ? d.count : ""}</div>
                       <div
                         className="w-full bg-purple-600 rounded-t"
                         style={{ height: `${(d.count / maxCount) * 100}%`, minHeight: "3px" }}
                       />
-                      <div className="text-[9px] text-gray-400 mt-1">{d.day.slice(5)}</div>
+                      <div className="text-[9px] text-gray-400 mt-1">
+                        {recentDays.indexOf(d) % 2 === 0 ? d.day.slice(5) : ""}
+                      </div>
                     </div>
                   ))}
                 </div>

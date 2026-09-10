@@ -2,6 +2,7 @@
 
 import { useState, useEffect } from "react";
 import { useRouter } from "next/navigation";
+import Link from "next/link";
 import { createClient } from "@/lib/supabase";
 
 interface DailyCount {
@@ -50,6 +51,7 @@ export default function Admin() {
   const [unlockLogs, setUnlockLogs] = useState<UnlockRow[]>([]);
   const [topups, setTopups] = useState<TopupRow[]>([]);
   const [busyId, setBusyId] = useState<string | null>(null);
+  const [myEmail, setMyEmail] = useState("");
 
   async function loadAll() {
     const [ov, mem, ul, tp] = await Promise.all([
@@ -77,6 +79,7 @@ export default function Admin() {
         router.replace("/login");
         return;
       }
+      setMyEmail(userData.user.email || "");
       loadAll();
     }
     init();
@@ -131,15 +134,18 @@ export default function Admin() {
     <main className="min-h-screen bg-purple-50 px-4 py-6">
       <div className="max-w-2xl mx-auto">
         <div className="flex items-center justify-between mb-6">
-          <div className="flex items-center gap-2">
+          <Link href="/" className="flex items-center gap-2">
             <div className="w-8 h-8 bg-purple-900 rounded-full flex items-center justify-center text-gold-400 font-bold text-sm">
               EK
             </div>
             <span className="text-lg font-bold text-purple-900">ExKey 管理後台</span>
+          </Link>
+          <div className="flex items-center gap-3">
+            {myEmail && <span className="text-xs text-gray-400">{myEmail}</span>}
+            <button onClick={() => router.push("/member")} className="text-sm text-gray-500 underline">
+              回會員專區
+            </button>
           </div>
-          <button onClick={() => router.push("/member")} className="text-sm text-gray-500 underline">
-            回會員專區
-          </button>
         </div>
 
         {loading && <div className="text-center py-12 text-gray-400">載入中...</div>}
@@ -147,6 +153,7 @@ export default function Admin() {
         {!loading && denied && (
           <div className="bg-white rounded-2xl border border-gray-100 p-6 shadow-sm text-center text-gray-600">
             此頁僅限管理員使用
+            {myEmail && <p className="text-xs text-gray-400 mt-2">目前登入：{myEmail}</p>}
           </div>
         )}
 

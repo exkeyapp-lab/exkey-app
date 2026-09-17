@@ -376,9 +376,15 @@ export default function Discover() {
                 {unlock.stage === "nopoints" && (
                   <div className="bg-gold-50 border border-gold-100 rounded-xl p-3">
                     <p className="text-sm font-medium text-gray-900 mb-1">點數不足</p>
-                    <p className="text-xs text-gray-500">
-                      解鎖需 {UNLOCK_COST} 點。加值方式請洽平台管理員，完成後點數會直接加入你的帳戶。
+                    <p className="text-xs text-gray-500 mb-2">
+                      解鎖需 {UNLOCK_COST} 點。加值 100 點只要 NT$500，可解鎖 10 位合作對象。
                     </p>
+                    <button
+                      onClick={() => router.push("/topup")}
+                      className="w-full bg-gold-600 text-purple-900 font-semibold py-2 rounded-lg text-sm"
+                    >
+                      前往加值 →
+                    </button>
                   </div>
                 )}
 

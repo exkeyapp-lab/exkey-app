@@ -166,6 +166,13 @@ export default function Member() {
               </div>
             </div>
 
+            <button
+              onClick={() => router.push("/topup")}
+              className="w-full border border-gold-600 text-gold-900 font-medium py-2.5 rounded-xl text-sm bg-white"
+            >
+              加值點數（100 點 / NT$500）→
+            </button>
+
             <div className="bg-white rounded-2xl border border-gray-100 p-4 shadow-sm">
               <div className="text-xs text-gray-400 mb-1">我想找的人脈</div>
               <Tags items={profile.seek_industries || []} level={profile.seek_level} />

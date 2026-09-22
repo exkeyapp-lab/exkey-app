@@ -377,13 +377,13 @@ export default function Discover() {
                   <div className="bg-gold-50 border border-gold-100 rounded-xl p-3">
                     <p className="text-sm font-medium text-gray-900 mb-1">點數不足</p>
                     <p className="text-xs text-gray-500 mb-2">
-                      解鎖需 {UNLOCK_COST} 點。加值 100 點只要 NT$500，可解鎖 10 位合作對象。
+                      解鎖需 {UNLOCK_COST} 點。用一杯咖啡的錢，創造無限的機會——100 點 NT$500，可解鎖 10 位合作對象。
                     </p>
                     <button
-                      onClick={() => router.push("/topup")}
+                      onClick={() => router.push("/member")}
                       className="w-full bg-gold-600 text-purple-900 font-semibold py-2 rounded-lg text-sm"
                     >
-                      前往加值 →
+                      前往會員專區加值 →
                     </button>
                   </div>
                 )}

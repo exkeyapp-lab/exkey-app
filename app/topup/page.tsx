@@ -104,8 +104,11 @@ export default function Topup() {
         </div>
 
         <h1 className="text-2xl font-bold text-gray-900 mb-1">加值點數</h1>
-        <p className="text-sm text-gray-500 mb-6">
+        <p className="text-sm text-gray-500 mb-1">
           {points != null ? `目前餘額 ${points} 點` : "解鎖聯絡方式需要點數"}
+        </p>
+        <p className="text-base font-semibold text-purple-600 mb-6">
+          用一杯咖啡的錢，創造無限的機會
         </p>
 
         {loading && <div className="text-center py-12 text-gray-400">載入中...</div>}
@@ -121,6 +124,7 @@ export default function Topup() {
                 <div className="ml-auto text-2xl font-semibold">NT${PACK_PRICE}</div>
               </div>
               <div className="text-sm text-purple-100 mt-2">可解鎖 {PACK_POINTS / 10} 位合作對象的聯絡方式・點數無使用期限</div>
+              <div className="text-xs text-gold-400 mt-1">平均一位關鍵人脈 NT${PACK_PRICE / (PACK_POINTS / 10)}</div>
 
               <div className="mt-4 flex items-center gap-3">
                 <span className="text-sm">數量</span>

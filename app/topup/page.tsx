@@ -5,10 +5,10 @@ import { useRouter } from "next/navigation";
 import Link from "next/link";
 import { createClient } from "@/lib/supabase";
 
-// ===== 匯款資訊：上線前把下面三個值換成真實資料 =====
-const BANK_NAME = "（請填銀行名稱與代碼）";
-const BANK_ACCOUNT = "（請填帳號）";
-const BANK_HOLDER = "（請填戶名）";
+// ===== 匯款資訊 =====
+const BANK_NAME = "玉山銀行（808）竹北分行";
+const BANK_ACCOUNT = "0750-940-003106";
+const BANK_HOLDER = "關鍵人脈資訊股份有限公司";
 
 const PACK_POINTS = 100;
 const PACK_PRICE = 500;
@@ -163,6 +163,12 @@ export default function Topup() {
                   <span className="font-medium text-gray-900">{BANK_HOLDER}</span>
                 </div>
               </div>
+              <button
+                onClick={() => navigator.clipboard.writeText(BANK_ACCOUNT.replace(/-/g, ""))}
+                className="w-full mt-3 border border-gray-200 text-gray-600 text-xs py-2 rounded-lg"
+              >
+                複製帳號
+              </button>
             </div>
 
             {/* 回報表單 */}

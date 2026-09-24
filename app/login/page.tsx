@@ -16,6 +16,7 @@ export default function Login() {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   const [sent, setSent] = useState(false);
+  const [agreedTerms, setAgreedTerms] = useState(false);
 
   // Google 登入：導向 Google 授權頁，完成後回到會員專區
   async function handleGoogle() {
@@ -81,7 +82,10 @@ export default function Login() {
   }
 
   const disabled =
-    busy || !email.trim() || (mode !== "forgot" && password.length < 6);
+    busy ||
+    !email.trim() ||
+    (mode !== "forgot" && password.length < 6) ||
+    (mode === "register" && !agreedTerms);
 
   function switchMode(m: Mode) {
     setMode(m);
@@ -127,7 +131,7 @@ export default function Login() {
             <>
               <button
                 onClick={handleGoogle}
-                disabled={busy}
+                disabled={busy || (mode === "register" && !agreedTerms)}
                 className="w-full flex items-center justify-center gap-2 border border-gray-200 rounded-xl py-3 text-sm font-medium text-gray-700 hover:bg-gray-50 transition disabled:opacity-50"
               >
                 <svg width="18" height="18" viewBox="0 0 18 18" aria-hidden="true">
@@ -206,6 +210,28 @@ export default function Login() {
                 </div>
               )}
 
+              {mode === "register" && (
+                <label className="flex items-start gap-2 text-xs text-gray-600 cursor-pointer">
+                  <input
+                    type="checkbox"
+                    checked={agreedTerms}
+                    onChange={(e) => setAgreedTerms(e.target.checked)}
+                    className="mt-0.5"
+                  />
+                  <span>
+                    我已閱讀並同意{" "}
+                    
+                      href="/terms"
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="text-purple-600 underline"
+                    >
+                      服務條款與隱私權政策
+                    </a>
+                  </span>
+                </label>
+              )}
+
               {error && <p className="text-sm text-red-600">{error}</p>}
 
               <button
@@ -235,7 +261,7 @@ export default function Login() {
                 {mode === "login"
                   ? "還沒有帳號？點上方「註冊新帳號」"
                   : mode === "register"
-                  ? "註冊即表示同意平台內測條款"
+                  ? "勾選上方同意條款後即可註冊"
                   : ""}
               </p>
               {mode === "forgot" && (

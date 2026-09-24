@@ -4,7 +4,7 @@ export default function Home() {
   return (
     <main className="min-h-screen bg-purple-50">
       {/* Hero 區塊 */}
-           <section className="bg-gradient-to-br from-purple-600 to-purple-900 text-white px-6 py-16">
+      <section className="bg-gradient-to-br from-purple-600 to-purple-900 text-white px-6 py-16">
         <div className="max-w-2xl mx-auto flex justify-end mb-2">
           <Link
             href="/login"
@@ -133,6 +133,11 @@ export default function Home() {
 
       {/* Footer */}
       <footer className="text-center py-8 text-sm text-gray-400 border-t border-gray-100">
+        <div className="mb-2">
+          <Link href="/terms" className="text-gray-500 underline hover:text-purple-600">
+            服務條款與隱私權政策
+          </Link>
+        </div>
         © 2026 ExKey Lab · 關鍵人脈媒合平台
       </footer>
     </main>

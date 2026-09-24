@@ -128,7 +128,7 @@ export function emptyOnboardingData(): OnboardingData {
 // discover 頁改用逐欄查詢，line_id 不再隨整包資料送到瀏覽器
 export const PUBLIC_PROFILE_COLUMNS =
   "id, user_id, name, company, bio, role, has_offer, is_verified, is_active, " +
-  "offer_industries, offer_regions, offer_departments, offer_level, " +
-  "seek_industries, seek_regions, seek_departments, seek_level";
+  "offer_industries, offer_regions, offer_departments, offer_level, offer_note, " +
+  "seek_industries, seek_regions, seek_departments, seek_level, seek_note";
 
 export type PublicProfile = Omit<Profile, "line_id">;

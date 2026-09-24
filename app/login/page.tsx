@@ -220,7 +220,7 @@ export default function Login() {
                   />
                   <span>
                     我已閱讀並同意{" "}
-                    
+                    <a
                       href="/terms"
                       target="_blank"
                       rel="noopener noreferrer"

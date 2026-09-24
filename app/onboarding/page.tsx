@@ -2,6 +2,7 @@
 
 import { useState, useEffect } from "react";
 import { useRouter } from "next/navigation";
+import Link from "next/link";
 import { createClient } from "@/lib/supabase";
 import {
   INDUSTRIES,
@@ -121,11 +122,13 @@ function LevelPicker({
   subtitle,
   level,
   onSelect,
+  extra,
 }: {
   title: string;
   subtitle: string;
   level: number;
   onSelect: (v: number) => void;
+  extra?: React.ReactNode;
 }) {
   return (
     <div>
@@ -158,6 +161,36 @@ function LevelPicker({
           </button>
         ))}
       </div>
+      {extra}
+    </div>
+  );
+}
+
+// 自由補充欄：勾選框表達不了的細節（例：我認識台積電採購課長、台塑廠務經理）
+function NoteBox({
+  label,
+  placeholder,
+  value,
+  onChange,
+}: {
+  label: string;
+  placeholder: string;
+  value: string;
+  onChange: (v: string) => void;
+}) {
+  return (
+    <div className="mt-6 pt-6 border-t border-gray-100">
+      <label className="block text-sm font-medium text-gray-700 mb-1">{label}</label>
+      <p className="text-xs text-gray-400 mb-2">選填。上面的選項不夠用時，這裡可以自由寫，其他會員看得到</p>
+      <textarea
+        value={value}
+        onChange={(e) => onChange(e.target.value)}
+        placeholder={placeholder}
+        rows={3}
+        maxLength={200}
+        className="w-full px-4 py-3 rounded-xl border border-gray-200 focus:border-purple-600 outline-none text-sm resize-none"
+      />
+      <p className="text-xs text-gray-400 mt-1 text-right">{value.length} / 200</p>
     </div>
   );
 }
@@ -173,6 +206,7 @@ export default function Onboarding() {
 
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
+  const [agreedTerms, setAgreedTerms] = useState(false);
 
   // 靜默偵測登入狀態：已登入者記住帳號 ID（最後一步免填帳密）；
   // 已建過檔案者直接導向會員專區，避免重複建檔。未登入者照常填寫。
@@ -237,7 +271,7 @@ export default function Onboarding() {
           }
           uid = signInData.user?.id ?? null;
         } else {
-                   const m = signUpErr.message.toLowerCase();
+          const m = signUpErr.message.toLowerCase();
           let reason = signUpErr.message;
           if (m.includes("rate limit") || m.includes("security purposes")) {
             reason = "短時間內嘗試次數過多，請等幾分鐘再送出（你填的資料都還在）";
@@ -314,17 +348,20 @@ export default function Onboarding() {
     (step === "role" && !data.role) ||
     (step === "basic" && !data.name.trim()) ||
     (step === "line_id" &&
-      (!data.line_id.trim() || saving || (!userId && (!email.trim() || password.length < 6))));
+      (!data.line_id.trim() ||
+        saving ||
+        !agreedTerms ||
+        (!userId && (!email.trim() || password.length < 6))));
 
   return (
     <main className="min-h-screen bg-purple-50 px-4 py-6">
       <div className="max-w-md mx-auto">
-        <div className="flex items-center gap-2 mb-6">
+        <Link href="/" className="flex items-center gap-2 mb-6 w-fit">
           <div className="w-8 h-8 bg-purple-600 rounded-full flex items-center justify-center text-white font-bold text-sm">
             EK
           </div>
           <span className="text-lg font-bold text-purple-900">ExKey</span>
-        </div>
+        </Link>
         <div className="mb-8">
           <div className="flex justify-between text-xs text-gray-500 mb-2">
             <span>{STEP_TITLES[step]}</span>
@@ -456,6 +493,14 @@ export default function Onboarding() {
             subtitle="想認識哪個職級的人脈？不確定就選「不限」"
             level={data.seek.level}
             onSelect={(v) => setData((p) => ({ ...p, seek: { ...p.seek, level: v } }))}
+            extra={
+              <NoteBox
+                label="想找的人脈，還想補充什麼？"
+                placeholder="例：想找竹科半導體廠的設備採購決策者，或能介紹科技廠總務的人"
+                value={data.seek.note}
+                onChange={(v) => setData((p) => ({ ...p, seek: { ...p.seek, note: v } }))}
+              />
+            }
           />
         )}
 
@@ -540,6 +585,14 @@ export default function Onboarding() {
             subtitle="你認識的人脈職級大概到哪？不確定就選「不限」"
             level={data.offer.level}
             onSelect={(v) => setData((p) => ({ ...p, offer: { ...p.offer, level: v } }))}
+            extra={
+              <NoteBox
+                label="你能介紹的人脈，一句話說明"
+                placeholder="例：我認識台積電採購課長、台塑廠務經理，另有幾位化工廠總經理"
+                value={data.offer.note}
+                onChange={(v) => setData((p) => ({ ...p, offer: { ...p.offer, note: v } }))}
+              />
+            }
           />
         )}
 
@@ -599,6 +652,18 @@ export default function Onboarding() {
                 </span>
               </div>
             </div>
+            <label className="flex items-start gap-2 mt-4 text-xs text-gray-600 cursor-pointer">
+              <input
+                type="checkbox"
+                checked={agreedTerms}
+                onChange={(e) => setAgreedTerms(e.target.checked)}
+                className="mt-0.5"
+              />
+              <span>
+                我已閱讀並同意 <a href="/terms" target="_blank" rel="noopener noreferrer" className="text-purple-600 underline">服務條款與隱私權政策</a>，瞭解本平台為資訊中介，會員間的聯繫與合作由雙方自行負責，且點數一經使用不予退費。
+              </span>
+            </label>
+
             {error && <p className="text-sm text-red-600 mt-3">{error}</p>}
           </div>
         )}

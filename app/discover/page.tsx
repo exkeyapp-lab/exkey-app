@@ -19,11 +19,42 @@ function dimensionScore(seekList: string[], offerList: string[], weight: number)
   return overlap * weight;
 }
 
-// 職級門檻計分：seekLevel = 0 代表不限
+// 職級計分：達到門檻給滿分，差一階仍給部分分數（放寬媒合範圍，
+// 避免「想找高階主管」時完全看不到課長級的人脈）
 function levelScore(seekLevel: number, offerLevel: number | null | undefined): number {
   if (!seekLevel) return 0;
   if (offerLevel == null) return 0;
-  return offerLevel >= seekLevel ? 30 : 0;
+  const gap = offerLevel - seekLevel;
+  if (gap >= 0) return 30;
+  if (gap === -1) return 18;
+  if (gap === -2) return 10;
+  return 5;
+}
+
+// 這位會員「自己開的條件」最多能拿幾分，用來把分數換算成誠實的百分比
+function maxPrimaryScore(seek: SideSnapshot): number {
+  return (
+    seek.industries.length * 20 +
+    seek.regions.length * 15 +
+    seek.departments.length * 15 +
+    (seek.level ? 30 : 0)
+  );
+}
+
+// 列出實際對上的維度，讓低分的推薦也看得懂為什麼出現
+function matchReasons(
+  seek: SideSnapshot,
+  offer: { industries: string[]; regions: string[]; departments: string[]; level: number | null | undefined }
+): string[] {
+  const out: string[] = [];
+  if (seek.industries.length && offer.industries.some((v) => seek.industries.includes(v))) out.push("產業");
+  if (seek.regions.length && offer.regions.some((v) => seek.regions.includes(v))) out.push("地區");
+  if (seek.departments.length && offer.departments.some((v) => seek.departments.includes(v))) out.push("部門");
+  if (seek.level && offer.level != null) {
+    if (offer.level >= seek.level) out.push("職級");
+    else if (offer.level === seek.level - 1) out.push("職級接近");
+  }
+  return out;
 }
 
 // 單方向比對：某一方的「想找」對上另一方的「提供」
@@ -56,7 +87,12 @@ function sideFromProfile(p: PublicProfile, which: "seek" | "offer"): SideSnapsho
   };
 }
 
-type Recommendation = PublicProfile & { score: number; mutual: boolean };
+type Recommendation = PublicProfile & {
+  score: number;
+  mutual: boolean;
+  percent: number | null;
+  reasons: string[];
+};
 
 // 每張卡片的解鎖狀態
 type UnlockState =
@@ -123,11 +159,15 @@ export default function Discover() {
         return;
       }
 
+      const myMax = maxPrimaryScore(mySeek);
+
       const scored = (data as unknown as PublicProfile[])
         .filter((p) => p.id !== me.id && p.user_id !== uid)
         .map((p) => {
+          const theirOffer = sideFromProfile(p, "offer");
+
           // 主方向：我想找 vs 對方提供
-          const primary = oneDirectionScore(mySeek, sideFromProfile(p, "offer"));
+          const primary = oneDirectionScore(mySeek, theirOffer);
 
           // 反方向：對方想找 vs 我提供（只有我有填提供側時才計算，達成「雙向互補」加分）
           let secondary = 0;
@@ -135,7 +175,13 @@ export default function Discover() {
             secondary = oneDirectionScore(sideFromProfile(p, "seek"), myOffer);
           }
 
-          return { ...p, score: primary + secondary, mutual: primary > 0 && secondary > 0 };
+          return {
+            ...p,
+            score: primary + secondary,
+            mutual: primary > 0 && secondary > 0,
+            percent: myMax > 0 ? Math.round(Math.min(primary / myMax, 1) * 100) : null,
+            reasons: matchReasons(mySeek, theirOffer),
+          };
         })
         .sort((a, b) => b.score - a.score)
         .slice(0, 5);
@@ -240,12 +286,25 @@ export default function Discover() {
                     </div>
                   </div>
                   <div className="text-right">
-                    <div className="text-xs text-gray-400">媒合度</div>
-                    <div className="text-lg font-bold text-purple-600">{Math.min(p.score, 100)}%</div>
+                    <div className="text-xs text-gray-400">符合你的條件</div>
+                    <div className="text-lg font-bold text-purple-600">
+                      {p.percent != null ? `${p.percent}%` : "不限"}
+                    </div>
                   </div>
                 </div>
 
+                {p.reasons.length > 0 && (
+                  <div className="text-xs text-purple-600 mb-2">符合：{p.reasons.join("、")}</div>
+                )}
+
                 {p.bio && <p className="text-sm text-gray-600 mb-3">{p.bio}</p>}
+
+                {p.offer_note && (
+                  <div className="text-sm text-gray-700 bg-purple-50 border border-purple-100 rounded-xl p-3 mb-3">
+                    <div className="text-xs text-gray-400 mb-1">他的補充說明</div>
+                    {p.offer_note}
+                  </div>
+                )}
 
                 <div className="mb-3">
                   <div className="text-xs text-gray-400 mb-1">他能介紹</div>

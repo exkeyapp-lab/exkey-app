@@ -624,7 +624,7 @@ export default function Onboarding() {
             <span className="text-lg font-bold text-purple-900">ExKey</span>
           </Link>
           <div className="bg-white rounded-2xl border border-purple-100 p-6 shadow-sm">
-            <div className="w-14 h-14 rounded-2xl bg-gradient-to-br from-purple-600 to-purple-900 mb-4 flex items-center justify-center">
+            <div className="w-14 h-14 rounded-2xl ek-rich-sm mb-4 flex items-center justify-center">
               <svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
                 <rect x="3" y="5" width="18" height="14" rx="2" />
                 <path d="M3 7l9 6 9-6" />
@@ -675,7 +675,7 @@ export default function Onboarding() {
     return (
       <main className="min-h-screen bg-purple-50 px-4 py-6 flex items-center">
         <div className="max-w-md mx-auto w-full text-center">
-          <div className="w-14 h-14 rounded-2xl bg-gradient-to-br from-purple-600 to-purple-900 mx-auto mb-4 animate-pulse" />
+          <div className="w-14 h-14 rounded-2xl ek-rich-sm mx-auto mb-4 animate-pulse" />
           <p className="text-base font-semibold text-purple-900">帳號已啟用，正在建立你的檔案…</p>
           {error && <p className="text-sm text-red-600 mt-3">{error}</p>}
         </div>
@@ -708,7 +708,7 @@ export default function Onboarding() {
         )}
 
         {fromInvite && !editMode && stepIndex === 0 && (
-          <div className="bg-gradient-to-br from-purple-600 to-purple-900 text-white rounded-2xl p-4 mb-5 shadow-lg">
+          <div className="ek-rich text-white rounded-2xl p-4 mb-5 overflow-hidden">
             <div className="text-xs text-purple-100 mb-1">你是透過朋友的邀請連結來的</div>
             <div className="text-sm leading-relaxed">
               ExKey 幫業務與廠商配對想認識的合作對象，配對後才解鎖聯絡方式。完成註冊，你和邀請你的朋友各得{" "}

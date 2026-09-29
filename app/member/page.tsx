@@ -354,7 +354,7 @@ export default function Member() {
 
             {/* 推薦碼 */}
             {referral && referral.code && (
-              <div className="bg-gradient-to-br from-purple-600 to-purple-900 text-white rounded-2xl p-4 shadow-lg">
+              <div className="ek-rich text-white rounded-2xl p-4 overflow-hidden">
                 <div className="text-xs text-purple-100 mb-1">我的推薦碼</div>
                 <div className="flex items-center justify-between">
                   <div className="text-3xl font-bold tracking-[0.2em] text-gold-400">{referral.code}</div>

@@ -2,6 +2,7 @@
 
 import { useState, useEffect } from "react";
 import { useRouter } from "next/navigation";
+import Link from "next/link";
 import { createClient } from "@/lib/supabase";
 import { levelLabel, PUBLIC_PROFILE_COLUMNS, type PublicProfile } from "@/lib/types";
 
@@ -104,6 +105,166 @@ type UnlockState =
   | { stage: "error" };
 
 const UNLOCK_COST = 10;
+const SITE_URL = "https://exkey-app.vercel.app";
+const REF_BANNER_KEY = "exkey_ref_banner_seen";
+
+// 分享訊息：先講清楚是誰、這是什麼、誰經營，最後才是推薦碼和連結，對方才不會當詐騙
+function buildInviteMessage(senderName: string, code: string, link: string): string {
+  return [
+    `${senderName} 邀請你加入 ExKey 關鍵人脈`,
+    "",
+    "ExKey 是一個讓業務與廠商互相介紹人脈的平台：依產業、地區、部門、職級幫你配對想認識的合作對象，配對後才解鎖聯絡方式。",
+    "",
+    `用我的推薦碼註冊，我們各得 5 點（可用來解鎖聯絡方式）`,
+    `推薦碼：${code}`,
+    "",
+    "註冊連結（推薦碼會自動帶入）：",
+    link,
+    "",
+    "由關鍵人脈資訊股份有限公司經營",
+    `服務條款：${SITE_URL}/terms`,
+  ].join("\n");
+}
+
+// 手機上開原生分享面板（LINE、訊息等），不支援的環境就複製到剪貼簿
+async function shareOrCopy(text: string): Promise<"shared" | "copied" | "failed"> {
+  if (typeof navigator !== "undefined" && "share" in navigator) {
+    try {
+      await (navigator as Navigator & { share: (d: { text: string }) => Promise<void> }).share({ text });
+      return "shared";
+    } catch (e) {
+      // 使用者取消分享時不當成失敗，也不 fallback 複製
+      if ((e as { name?: string }).name === "AbortError") return "failed";
+    }
+  }
+  try {
+    await navigator.clipboard.writeText(text);
+    return "copied";
+  } catch {
+    return "failed";
+  }
+}
+
+// ==================== 視覺元件 ====================
+
+// 配對度圓環：把百分比變成一眼可讀的圖形
+function MatchRing({ percent }: { percent: number }) {
+  const r = 20;
+  const circumference = 2 * Math.PI * r;
+  const offset = circumference * (1 - Math.min(Math.max(percent, 0), 100) / 100);
+  return (
+    <div className="relative w-14 h-14 shrink-0">
+      <svg width="56" height="56" viewBox="0 0 56 56" className="-rotate-90">
+        <circle cx="28" cy="28" r={r} fill="none" stroke="#EEE7F7" strokeWidth="5" />
+        <circle
+          cx="28"
+          cy="28"
+          r={r}
+          fill="none"
+          stroke={percent >= 60 ? "#D4AF37" : "#6B4FB8"}
+          strokeWidth="5"
+          strokeLinecap="round"
+          strokeDasharray={circumference}
+          strokeDashoffset={offset}
+        />
+      </svg>
+      <div className="absolute inset-0 flex items-center justify-center">
+        <span className="text-base font-bold text-purple-900 leading-none">
+          {percent}
+          <span className="text-[10px] text-gray-400 font-medium">%</span>
+        </span>
+      </div>
+    </div>
+  );
+}
+
+// 把一組條件整理成標籤清單，職級標籤加重顯示
+function conditionChips(
+  industries: string[] | null | undefined,
+  regions: string[] | null | undefined,
+  departments: string[] | null | undefined,
+  level: number | null | undefined
+): { text: string; strong: boolean }[] {
+  const out: { text: string; strong: boolean }[] = [];
+  (industries || []).slice(0, 3).forEach((v) => out.push({ text: v, strong: false }));
+  (regions || []).slice(0, 2).forEach((v) => out.push({ text: v, strong: false }));
+  (departments || []).slice(0, 2).forEach((v) => out.push({ text: v, strong: false }));
+  if (level != null && level > 0) out.push({ text: levelLabel(level), strong: true });
+  return out;
+}
+
+// 條件區塊：左側色條 + 標題 + 標籤群，兩個區塊用顏色區分方向
+function ConditionBlock({
+  title,
+  tone,
+  chips,
+  emptyText,
+  note,
+}: {
+  title: string;
+  tone: "offer" | "seek";
+  chips: { text: string; strong: boolean }[];
+  emptyText: string;
+  note?: string | null;
+}) {
+  const bar = tone === "offer" ? "bg-purple-600" : "bg-gold-600";
+  const label = tone === "offer" ? "text-purple-600" : "text-gold-900";
+  const chipPlain =
+    tone === "offer"
+      ? "bg-purple-50 text-purple-900 border-purple-100"
+      : "bg-gold-50 text-gold-900 border-gold-100";
+  const chipStrong =
+    tone === "offer" ? "bg-purple-600 text-white border-purple-600" : "bg-gold-600 text-purple-900 border-gold-600";
+
+  return (
+    <div className="flex gap-3">
+      <div className={`w-1 rounded-full shrink-0 ${bar}`} />
+      <div className="flex-1 min-w-0">
+        <div className={`text-[11px] font-semibold tracking-wide mb-1.5 ${label}`}>{title}</div>
+        {chips.length === 0 ? (
+          <div className="text-xs text-gray-400">{emptyText}</div>
+        ) : (
+          <div className="flex flex-wrap gap-1.5">
+            {chips.map((c, i) => (
+              <span
+                key={`${title}-${c.text}-${i}`}
+                className={`text-xs px-2.5 py-1 rounded-lg border font-medium ${
+                  c.strong ? chipStrong : chipPlain
+                }`}
+              >
+                {c.text}
+              </span>
+            ))}
+          </div>
+        )}
+        {note && <div className="text-xs text-gray-500 mt-2 leading-relaxed">「{note}」</div>}
+      </div>
+    </div>
+  );
+}
+
+// 載入中的骨架卡，比「載入中...」三個字更不像壞掉
+function SkeletonCard() {
+  return (
+    <div className="bg-white rounded-2xl border border-purple-100 p-5 shadow-sm animate-pulse">
+      <div className="flex items-center gap-3">
+        <div className="w-14 h-14 rounded-2xl bg-purple-100" />
+        <div className="flex-1 space-y-2">
+          <div className="h-4 w-24 bg-purple-100 rounded" />
+          <div className="h-3 w-36 bg-gray-100 rounded" />
+        </div>
+        <div className="w-14 h-14 rounded-full bg-gray-100" />
+      </div>
+      <div className="mt-5 space-y-2">
+        <div className="h-3 w-full bg-gray-100 rounded" />
+        <div className="h-3 w-3/5 bg-gray-100 rounded" />
+      </div>
+      <div className="mt-5 h-11 bg-purple-100 rounded-xl" />
+    </div>
+  );
+}
+
+// ==================== 頁面 ====================
 
 export default function Discover() {
   const router = useRouter();
@@ -114,6 +275,9 @@ export default function Discover() {
   const [name, setName] = useState("");
   const [unlocks, setUnlocks] = useState<Record<string, UnlockState>>({});
   const [points, setPoints] = useState<number | null>(null);
+  const [refCode, setRefCode] = useState<string | null>(null);
+  const [showRefBanner, setShowRefBanner] = useState(false);
+  const [copiedLink, setCopiedLink] = useState(false);
 
   async function refreshWallet() {
     const { data } = await supabase.rpc("get_my_wallet");
@@ -146,6 +310,16 @@ export default function Discover() {
       const me = mine[0] as unknown as PublicProfile;
       setName(me.name);
       refreshWallet();
+
+      // 我的推薦碼：第一次進推薦頁時提示一次，之後在「點數不足」時再提
+      supabase.rpc("my_referral").then(({ data: ref }) => {
+        const code = ref && typeof ref === "object" ? (ref as { code: string | null }).code : null;
+        if (!code) return;
+        setRefCode(code);
+        try {
+          if (!localStorage.getItem(REF_BANNER_KEY)) setShowRefBanner(true);
+        } catch {}
+      });
       const mySeek = sideFromProfile(me, "seek");
       const myOffer = sideFromProfile(me, "offer");
       const myHasOffer = me.has_offer;
@@ -212,256 +386,365 @@ export default function Discover() {
     refreshWallet();
   }
 
+  const shareLink = refCode ? `${SITE_URL}/onboarding?ref=${refCode}` : "";
+
+  async function copyShareLink() {
+    if (!shareLink || !refCode) return;
+    const r = await shareOrCopy(buildInviteMessage(name || "你的朋友", refCode, shareLink));
+    if (r === "copied") {
+      setCopiedLink(true);
+      setTimeout(() => setCopiedLink(false), 1500);
+    }
+  }
+
+  function dismissRefBanner() {
+    setShowRefBanner(false);
+    try {
+      localStorage.setItem(REF_BANNER_KEY, "1");
+    } catch {}
+  }
+
+  const roleLabel = (r: string) => (r === "sales" ? "業務" : r === "vendor" ? "廠商" : "業務 ＋ 廠商");
+
   return (
-    <main className="min-h-screen bg-purple-50 px-4 py-6">
-      <div className="max-w-md mx-auto">
-        <div className="flex items-center justify-between mb-6">
-          <div className="flex items-center gap-2">
-            <div className="w-8 h-8 bg-purple-600 rounded-full flex items-center justify-center text-white font-bold text-sm">
+    <main className="min-h-screen bg-purple-50 pb-12">
+      {/* 頂部固定列 */}
+      <header className="sticky top-0 z-20 bg-gradient-to-r from-purple-900 to-purple-600 shadow-lg">
+        <div className="max-w-md mx-auto px-4 h-14 flex items-center justify-between">
+          <Link href="/" className="flex items-center gap-2">
+            <div className="w-8 h-8 rounded-lg bg-gold-600 text-purple-900 flex items-center justify-center font-bold text-sm">
               EK
             </div>
-            <span className="text-lg font-bold text-purple-900">ExKey</span>
-          </div>
-          <div className="flex items-center gap-3">
+            <span className="text-base font-bold text-white tracking-wide">ExKey</span>
+          </Link>
+          <div className="flex items-center gap-2">
             {points != null && (
-              <span className="text-xs bg-gold-100 text-gold-900 px-3 py-1 rounded-full font-semibold">
+              <Link
+                href="/topup"
+                className="bg-white/10 border border-gold-400/50 text-gold-400 text-xs font-semibold px-3 py-1.5 rounded-full"
+              >
                 {points} 點
-              </span>
+              </Link>
             )}
-            <button onClick={() => router.push("/member")} className="text-sm text-gray-500 underline">
+            <button
+              onClick={() => router.push("/member")}
+              className="text-xs text-white/85 border border-white/25 px-3 py-1.5 rounded-full"
+            >
               會員專區
             </button>
           </div>
         </div>
+      </header>
 
-        <h1 className="text-2xl font-bold text-gray-900 mb-1">{name ? `${name}，為你推薦` : "推薦人脈"}</h1>
-        <p className="text-sm text-gray-500 mb-6">
-          {loading ? "正在尋找適合的合作夥伴..." : `為你準備了 ${recommendations.length} 位適合的合作夥伴`}
-        </p>
+      <div className="max-w-md mx-auto px-4">
+        {/* 標題區 */}
+        <div className="pt-7 pb-5">
+          <h1 className="text-[26px] leading-tight font-bold text-purple-900">
+            {name ? `${name}，為你推薦` : "推薦人脈"}
+          </h1>
+          <p className="text-sm text-gray-500 mt-1.5">
+            {loading
+              ? "正在比對全站人脈條件..."
+              : recommendations.length > 0
+              ? `依你設定的條件，找到 ${recommendations.length} 位合適對象`
+              : "依你設定的條件比對"}
+          </p>
+        </div>
 
-        {loading && <div className="text-center py-12 text-gray-400">載入中...</div>}
-
-        {!loading && noProfile && (
-          <div className="bg-white rounded-2xl border border-gray-100 p-6 shadow-sm text-center">
-            <p className="text-gray-600 mb-4">先建立你的人脈檔案，才能為你配對</p>
+        {/* 第一次進來：邀請提示（可關） */}
+        {!loading && !noProfile && showRefBanner && refCode && (
+          <div className="mb-5 bg-gradient-to-br from-purple-600 to-purple-900 text-white rounded-2xl p-4 shadow-lg relative">
             <button
-              onClick={() => router.push("/onboarding")}
-              className="w-full bg-purple-600 text-white font-medium py-3 rounded-xl"
+              onClick={dismissRefBanner}
+              aria-label="關閉"
+              className="absolute top-3 right-3 w-7 h-7 rounded-full bg-white/15 text-white text-sm leading-none"
             >
-              開始建立 →
+              ×
+            </button>
+            <div className="text-xs text-purple-100 mb-1">你的邀請連結已準備好</div>
+            <div className="text-sm leading-relaxed pr-8">
+              分享給同業，每成功邀請一位，你和對方各得 <span className="font-bold text-gold-400">5 點</span>
+              。你的推薦碼：<span className="font-bold tracking-widest text-gold-400">{refCode}</span>
+            </div>
+            <button
+              onClick={copyShareLink}
+              className="mt-3 w-full bg-gold-600 text-purple-900 text-sm font-bold py-2.5 rounded-xl"
+            >
+              {copiedLink ? "邀請訊息已複製，貼給朋友即可" : "分享邀請給同業"}
             </button>
           </div>
         )}
 
-        {!loading && !noProfile && recommendations.length === 0 && (
-          <div className="text-center py-12 text-gray-400">
-            目前還沒有適合的推薦，
-            <br />
-            等更多人加入後再回來看看！
+        {/* 載入中 */}
+        {loading && (
+          <div className="space-y-4">
+            <SkeletonCard />
+            <SkeletonCard />
           </div>
         )}
 
+        {/* 尚未建立檔案 */}
+        {!loading && noProfile && (
+          <div className="bg-white rounded-2xl border border-purple-100 p-7 shadow-sm text-center">
+            <div className="w-14 h-14 rounded-2xl bg-gradient-to-br from-purple-600 to-purple-900 mx-auto mb-4 flex items-center justify-center">
+              <svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth="2" strokeLinecap="round">
+                <path d="M12 5v14M5 12h14" />
+              </svg>
+            </div>
+            <p className="text-base font-semibold text-purple-900 mb-1">還沒有你的人脈檔案</p>
+            <p className="text-sm text-gray-500 mb-5 leading-relaxed">
+              填好你想找什麼、能介紹什麼，
+              <br />
+              系統才知道要幫你配對誰
+            </p>
+            <button
+              onClick={() => router.push("/onboarding")}
+              className="w-full bg-gold-600 text-purple-900 font-semibold py-3.5 rounded-xl shadow-sm"
+            >
+              開始建立檔案
+            </button>
+          </div>
+        )}
+
+        {/* 沒有推薦 */}
+        {!loading && !noProfile && recommendations.length === 0 && (
+          <div className="bg-white rounded-2xl border border-purple-100 p-7 shadow-sm text-center">
+            <div className="w-14 h-14 rounded-2xl bg-purple-100 mx-auto mb-4 flex items-center justify-center">
+              <svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="#4A2D8F" strokeWidth="2" strokeLinecap="round">
+                <circle cx="11" cy="11" r="7" />
+                <path d="M20 20l-3.5-3.5" />
+              </svg>
+            </div>
+            <p className="text-base font-semibold text-purple-900 mb-1">目前還沒有符合的對象</p>
+            <p className="text-sm text-gray-500 mb-5 leading-relaxed">
+              平台還在累積人脈中。
+              <br />
+              把條件放寬一些，或過幾天再回來看看
+            </p>
+            <button
+              onClick={() => router.push("/onboarding")}
+              className="w-full border border-purple-600 text-purple-600 font-semibold py-3 rounded-xl"
+            >
+              調整我的條件
+            </button>
+          </div>
+        )}
+
+        {/* 推薦清單 */}
         <div className="space-y-4">
-          {recommendations.map((p) => {
+          {recommendations.map((p, idx) => {
             const unlock = unlocks[p.id] || { stage: "idle" };
+            const top = idx === 0 && recommendations.length > 1 && (p.percent == null || p.percent >= 50);
+            const offerChips = conditionChips(
+              p.offer_industries,
+              p.offer_regions,
+              p.offer_departments,
+              p.offer_level
+            );
+            const seekChips = conditionChips(
+              p.seek_industries,
+              p.seek_regions,
+              p.seek_departments,
+              p.seek_level
+            );
+
             return (
-              <div key={p.id} className="bg-white rounded-2xl border border-gray-100 p-4 shadow-sm">
-                <div className="flex items-center gap-3 mb-3">
-                  <div className="w-12 h-12 rounded-full bg-purple-100 text-purple-900 flex items-center justify-center font-semibold text-lg">
-                    {p.name[0]}
-                  </div>
-                  <div className="flex-1">
-                    <div className="font-semibold text-gray-900 flex items-center gap-2">
-                      {p.name}
-                      {p.is_verified && (
-                        <span className="text-xs bg-gold-100 text-gold-900 px-2 py-0.5 rounded-full">已驗證</span>
-                      )}
-                      {p.mutual && (
-                        <span className="text-xs bg-purple-600 text-white px-2 py-0.5 rounded-full">雙向互補</span>
-                      )}
-                    </div>
-                    <div className="text-sm text-gray-500">
-                      {p.role === "sales" ? "業務" : p.role === "vendor" ? "廠商" : "業務+廠商"}
-                      {p.company ? `・${p.company}` : ""}
-                    </div>
-                  </div>
-                  <div className="text-right">
-                    <div className="text-xs text-gray-400">符合你的條件</div>
-                    <div className="text-lg font-bold text-purple-600">
-                      {p.percent != null ? `${p.percent}%` : "不限"}
-                    </div>
-                  </div>
-                </div>
-
-                {p.reasons.length > 0 && (
-                  <div className="text-xs text-purple-600 mb-2">符合：{p.reasons.join("、")}</div>
-                )}
-
-                {p.bio && <p className="text-sm text-gray-600 mb-3">{p.bio}</p>}
-
-                {p.offer_note && (
-                  <div className="text-sm text-gray-700 bg-purple-50 border border-purple-100 rounded-xl p-3 mb-3">
-                    <div className="text-xs text-gray-400 mb-1">他的補充說明</div>
-                    {p.offer_note}
+              <div
+                key={p.id}
+                className={`bg-white rounded-2xl shadow-sm overflow-hidden border ${
+                  top ? "border-gold-400" : "border-purple-100"
+                }`}
+              >
+                {top && (
+                  <div className="bg-gold-600 text-purple-900 text-[11px] font-bold tracking-wide px-4 py-1.5">
+                    最符合你條件的一位
                   </div>
                 )}
 
-                <div className="mb-3">
-                  <div className="text-xs text-gray-400 mb-1">他能介紹</div>
-                  {p.has_offer ? (
-                    <div className="flex flex-wrap gap-1">
-                      {(p.offer_industries || []).slice(0, 3).map((v) => (
-                        <span key={`oi-${v}`} className="text-xs bg-purple-100 text-purple-900 px-2 py-1 rounded">
-                          {v}
-                        </span>
-                      ))}
-                      {(p.offer_regions || []).slice(0, 2).map((v) => (
-                        <span
-                          key={`or-${v}`}
-                          className="text-xs bg-purple-50 text-purple-600 px-2 py-1 rounded border border-purple-100"
-                        >
-                          {v}
-                        </span>
-                      ))}
-                      {(p.offer_departments || []).slice(0, 2).map((v) => (
-                        <span key={`od-${v}`} className="text-xs bg-gold-50 text-gold-900 px-2 py-1 rounded border border-gold-100">
-                          {v}
-                        </span>
-                      ))}
-                      {p.offer_level != null && p.offer_level > 0 && (
-                        <span className="text-xs bg-gold-50 text-gold-900 px-2 py-1 rounded border border-gold-100">
-                          {levelLabel(p.offer_level)}
-                        </span>
-                      )}
+                <div className="p-5">
+                  {/* 身份列 */}
+                  <div className="flex items-start gap-3">
+                    <div className="w-14 h-14 rounded-2xl bg-gradient-to-br from-purple-600 to-purple-900 text-white flex items-center justify-center text-xl font-bold shrink-0 shadow-sm">
+                      {p.name[0]}
                     </div>
-                  ) : (
-                    <div className="text-xs text-gray-400">尚未填寫</div>
-                  )}
-                </div>
-
-                <div className="mb-3">
-                  <div className="text-xs text-gray-400 mb-1">他想找</div>
-                  <div className="flex flex-wrap gap-1">
-                    {(p.seek_industries || []).length === 0 &&
-                    (p.seek_regions || []).length === 0 &&
-                    (p.seek_departments || []).length === 0 &&
-                    (p.seek_level == null || p.seek_level === 0) ? (
-                      <span className="text-xs text-gray-400">不限</span>
-                    ) : (
-                      <>
-                        {(p.seek_industries || []).slice(0, 3).map((v) => (
-                          <span key={`si-${v}`} className="text-xs bg-purple-100 text-purple-900 px-2 py-1 rounded">
-                            {v}
-                          </span>
-                        ))}
-                        {(p.seek_regions || []).slice(0, 2).map((v) => (
-                          <span
-                            key={`sr-${v}`}
-                            className="text-xs bg-purple-50 text-purple-600 px-2 py-1 rounded border border-purple-100"
-                          >
-                            {v}
-                          </span>
-                        ))}
-                        {(p.seek_departments || []).slice(0, 2).map((v) => (
-                          <span key={`sd-${v}`} className="text-xs bg-gold-50 text-gold-900 px-2 py-1 rounded border border-gold-100">
-                            {v}
-                          </span>
-                        ))}
-                        {p.seek_level != null && p.seek_level > 0 && (
-                          <span className="text-xs bg-gold-50 text-gold-900 px-2 py-1 rounded border border-gold-100">
-                            {levelLabel(p.seek_level)}
+                    <div className="flex-1 min-w-0 pt-0.5">
+                      <div className="text-lg font-bold text-purple-900 truncate">{p.name}</div>
+                      <div className="text-sm text-gray-500 truncate">
+                        {roleLabel(p.role)}
+                        {p.company ? `・${p.company}` : ""}
+                      </div>
+                      <div className="flex flex-wrap gap-1.5 mt-2">
+                        {p.is_verified && (
+                          <span className="text-[11px] bg-gold-50 text-gold-900 border border-gold-100 px-2 py-0.5 rounded-full font-medium">
+                            已驗證
                           </span>
                         )}
-                      </>
+                        {p.mutual && (
+                          <span className="text-[11px] bg-purple-600 text-white px-2 py-0.5 rounded-full font-medium">
+                            雙向互補
+                          </span>
+                        )}
+                      </div>
+                    </div>
+                    <div className="shrink-0 text-center">
+                      {p.percent != null ? (
+                        <>
+                          <MatchRing percent={p.percent} />
+                          <div className="text-[10px] text-gray-400 mt-1">符合度</div>
+                        </>
+                      ) : (
+                        <div className="w-14 h-14 rounded-full border-[5px] border-purple-100 flex items-center justify-center text-xs font-bold text-purple-600">
+                          不限
+                        </div>
+                      )}
+                    </div>
+                  </div>
+
+                  {/* 配對原因 */}
+                  {p.reasons.length > 0 && (
+                    <div className="mt-4 bg-purple-50 rounded-xl px-3 py-2 text-xs text-purple-600 font-medium">
+                      符合你的條件：{p.reasons.join("、")}
+                    </div>
+                  )}
+
+                  {/* 自我介紹 */}
+                  {p.bio && <p className="mt-4 text-sm text-gray-600 leading-relaxed">{p.bio}</p>}
+
+                  {/* 條件兩欄 */}
+                  <div className="mt-4 space-y-4">
+                    <ConditionBlock
+                      title="他能介紹"
+                      tone="offer"
+                      chips={p.has_offer ? offerChips : []}
+                      emptyText="尚未填寫"
+                      note={p.offer_note}
+                    />
+                    <ConditionBlock
+                      title="他想找"
+                      tone="seek"
+                      chips={seekChips}
+                      emptyText="不限"
+                      note={p.seek_note}
+                    />
+                  </div>
+
+                  {/* 解鎖區 */}
+                  <div className="mt-5">
+                    {unlock.stage === "idle" && (
+                      <button
+                        onClick={() => setUnlock(p.id, { stage: "confirm" })}
+                        className="w-full bg-gold-600 text-purple-900 font-bold py-3.5 rounded-xl shadow-sm active:scale-[0.99] transition"
+                      >
+                        想合作，解鎖聯絡方式
+                      </button>
+                    )}
+
+                    {unlock.stage === "confirm" && (
+                      <div className="bg-purple-50 border border-purple-100 rounded-xl p-4">
+                        <div className="text-sm font-bold text-purple-900 mb-1.5">
+                          解鎖 {p.name} 的聯絡方式
+                        </div>
+                        <p className="text-xs text-gray-500 mb-4 leading-relaxed">
+                          解鎖需 <span className="font-bold text-purple-600">{UNLOCK_COST} 點</span>
+                          {points != null && (
+                            <>
+                              ，你目前有 <span className="font-bold text-purple-600">{points} 點</span>
+                            </>
+                          )}
+                          。解鎖過的對象之後免費查看，不重複扣點。
+                        </p>
+                        <div className="flex gap-2">
+                          <button
+                            onClick={() => setUnlock(p.id, { stage: "idle" })}
+                            className="px-5 py-2.5 rounded-xl border border-gray-200 text-gray-500 text-sm font-medium"
+                          >
+                            取消
+                          </button>
+                          <button
+                            onClick={() => handleUnlock(p.id)}
+                            className="flex-1 bg-gold-600 text-purple-900 font-bold py-2.5 rounded-xl text-sm"
+                          >
+                            確認解鎖（扣 {UNLOCK_COST} 點）
+                          </button>
+                        </div>
+                      </div>
+                    )}
+
+                    {unlock.stage === "loading" && (
+                      <div className="bg-purple-50 border border-purple-100 rounded-xl py-3.5 text-center text-sm text-purple-600 font-medium">
+                        解鎖中...
+                      </div>
+                    )}
+
+                    {unlock.stage === "revealed" && (
+                      <div className="bg-purple-900 rounded-xl p-4 flex items-center justify-between gap-3">
+                        <div className="min-w-0">
+                          <div className="text-[11px] text-purple-100 mb-0.5">對方的 LINE ID</div>
+                          <div className="font-bold text-gold-400 text-lg truncate">
+                            {unlock.lineId || "（未提供）"}
+                          </div>
+                        </div>
+                        <button
+                          onClick={() => navigator.clipboard.writeText(unlock.lineId)}
+                          className="shrink-0 text-sm bg-gold-600 text-purple-900 font-bold px-4 py-2 rounded-lg"
+                        >
+                          複製
+                        </button>
+                      </div>
+                    )}
+
+                    {unlock.stage === "nopoints" && (
+                      <div className="bg-gold-50 border border-gold-100 rounded-xl p-4">
+                        <p className="text-sm font-bold text-gold-900 mb-1">點數不足</p>
+                        <p className="text-xs text-gray-600 mb-3 leading-relaxed">
+                          解鎖需 {UNLOCK_COST} 點。用一杯咖啡的錢，創造無限的機會——100 點 NT$500，可解鎖 10
+                          位合作對象。
+                        </p>
+                        <button
+                          onClick={() => router.push("/member")}
+                          className="w-full bg-gold-600 text-purple-900 font-bold py-3 rounded-xl text-sm"
+                        >
+                          前往會員專區加值
+                        </button>
+                        {refCode && (
+                          <div className="mt-3 pt-3 border-t border-gold-100">
+                            <p className="text-xs text-gray-600 mb-2 leading-relaxed">
+                              或邀請同業加入：每成功一位，你和對方各得 5 點
+                            </p>
+                            <button
+                              onClick={copyShareLink}
+                              className="w-full border border-gold-600 text-gold-900 font-semibold py-2.5 rounded-xl text-sm bg-white"
+                            >
+                              {copiedLink ? "邀請訊息已複製，貼給朋友即可" : "分享邀請給同業"}
+                            </button>
+                          </div>
+                        )}
+                      </div>
+                    )}
+
+                    {unlock.stage === "error" && (
+                      <div className="bg-red-50 border border-red-200 rounded-xl p-4">
+                        <p className="text-sm text-red-600 mb-2">解鎖失敗，請稍後再試</p>
+                        <button onClick={() => handleUnlock(p.id)} className="text-sm text-purple-600 underline">
+                          重試
+                        </button>
+                      </div>
                     )}
                   </div>
                 </div>
-
-                {unlock.stage === "idle" && (
-                  <button
-                    onClick={() => setUnlock(p.id, { stage: "confirm" })}
-                    className="w-full bg-purple-600 text-white font-medium py-2.5 rounded-xl hover:bg-purple-400 transition"
-                  >
-                    想合作，解鎖聯絡方式
-                  </button>
-                )}
-
-                {unlock.stage === "confirm" && (
-                  <div className="bg-purple-50 border border-purple-100 rounded-xl p-3">
-                    <div className="text-sm font-medium text-gray-900 mb-1">解鎖 {p.name} 的聯絡方式</div>
-                    <p className="text-xs text-gray-500 mb-3">
-                      解鎖需 <span className="font-semibold text-purple-600">{UNLOCK_COST} 點</span>
-                      {points != null && <>，你目前有 <span className="font-semibold text-purple-600">{points} 點</span></>}
-                      。解鎖過的對象之後免費查看，不重複扣點。
-                    </p>
-                    <div className="flex gap-2">
-                      <button
-                        onClick={() => setUnlock(p.id, { stage: "idle" })}
-                        className="px-4 py-2 rounded-lg border border-gray-200 text-gray-600 text-sm"
-                      >
-                        取消
-                      </button>
-                      <button
-                        onClick={() => handleUnlock(p.id)}
-                        className="flex-1 bg-gold-600 text-purple-900 font-semibold py-2 rounded-lg text-sm"
-                      >
-                        確認解鎖（扣 {UNLOCK_COST} 點）
-                      </button>
-                    </div>
-                  </div>
-                )}
-
-                {unlock.stage === "loading" && (
-                  <div className="bg-purple-50 border border-purple-100 rounded-xl p-3 text-center text-sm text-gray-500">
-                    解鎖中...
-                  </div>
-                )}
-
-                {unlock.stage === "revealed" && (
-                  <div className="bg-green-50 border border-green-200 rounded-xl p-3 flex items-center justify-between">
-                    <div>
-                      <div className="text-xs text-gray-500">對方的 LINE ID</div>
-                      <div className="font-semibold text-gray-900">{unlock.lineId || "（未提供）"}</div>
-                    </div>
-                    <button
-                      onClick={() => navigator.clipboard.writeText(unlock.lineId)}
-                      className="text-sm bg-green-600 text-white px-3 py-1.5 rounded-lg"
-                    >
-                      複製
-                    </button>
-                  </div>
-                )}
-
-                {unlock.stage === "nopoints" && (
-                  <div className="bg-gold-50 border border-gold-100 rounded-xl p-3">
-                    <p className="text-sm font-medium text-gray-900 mb-1">點數不足</p>
-                    <p className="text-xs text-gray-500 mb-2">
-                      解鎖需 {UNLOCK_COST} 點。用一杯咖啡的錢，創造無限的機會——100 點 NT$500，可解鎖 10 位合作對象。
-                    </p>
-                    <button
-                      onClick={() => router.push("/member")}
-                      className="w-full bg-gold-600 text-purple-900 font-semibold py-2 rounded-lg text-sm"
-                    >
-                      前往會員專區加值 →
-                    </button>
-                  </div>
-                )}
-
-                {unlock.stage === "error" && (
-                  <div className="bg-red-50 border border-red-200 rounded-xl p-3">
-                    <p className="text-sm text-red-600 mb-2">解鎖失敗，請稍後再試</p>
-                    <button
-                      onClick={() => handleUnlock(p.id)}
-                      className="text-sm text-purple-600 underline"
-                    >
-                      重試
-                    </button>
-                  </div>
-                )}
               </div>
             );
           })}
         </div>
+
+        {/* 底部說明 */}
+        {!loading && recommendations.length > 0 && (
+          <p className="text-center text-xs text-gray-400 mt-7 leading-relaxed">
+            符合度依你設定的條件計算，不代表對方的合作意願。
+            <br />
+            解鎖過的對象可永久免費查看。
+          </p>
+        )}
       </div>
     </main>
   );

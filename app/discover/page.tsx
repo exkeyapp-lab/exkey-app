@@ -447,7 +447,7 @@ export default function Discover() {
   return (
     <main className="min-h-screen bg-purple-50 pb-12">
       {/* 頂部固定列 */}
-      <header className="sticky top-0 z-20 bg-gradient-to-r from-purple-900 to-purple-600 shadow-lg">
+      <header className="sticky top-0 z-20 ek-rich-bar">
         <div className="max-w-md mx-auto px-4 h-14 flex items-center justify-between">
           <Link href="/" className="flex items-center gap-2">
             <div className="w-8 h-8 rounded-lg bg-gold-600 text-purple-900 flex items-center justify-center font-bold text-sm">
@@ -491,7 +491,7 @@ export default function Discover() {
 
         {/* 第一次進來：邀請提示（可關） */}
         {!loading && !noProfile && showRefBanner && refCode && (
-          <div className="mb-5 bg-gradient-to-br from-purple-600 to-purple-900 text-white rounded-2xl p-4 shadow-lg relative">
+          <div className="mb-5 ek-rich text-white rounded-2xl p-4 overflow-hidden">
             <button
               onClick={dismissRefBanner}
               aria-label="關閉"
@@ -525,7 +525,7 @@ export default function Discover() {
         {/* 尚未建立檔案 */}
         {!loading && noProfile && (
           <div className="bg-white rounded-2xl border border-purple-100 p-7 shadow-sm text-center">
-            <div className="w-14 h-14 rounded-2xl bg-gradient-to-br from-purple-600 to-purple-900 mx-auto mb-4 flex items-center justify-center">
+            <div className="w-14 h-14 rounded-2xl ek-rich-sm mx-auto mb-4 flex items-center justify-center">
               <svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth="2" strokeLinecap="round">
                 <path d="M12 5v14M5 12h14" />
               </svg>
@@ -603,7 +603,7 @@ export default function Discover() {
                 <div className="p-5">
                   {/* 身份列 */}
                   <div className="flex items-start gap-3">
-                    <div className="w-14 h-14 rounded-2xl bg-gradient-to-br from-purple-600 to-purple-900 text-white flex items-center justify-center text-xl font-bold shrink-0 shadow-sm">
+                    <div className="w-14 h-14 rounded-2xl ek-rich-sm text-white flex items-center justify-center text-xl font-bold shrink-0 shadow-sm">
                       {p.name[0]}
                     </div>
                     <div className="flex-1 min-w-0 pt-0.5">

@@ -228,26 +228,70 @@ export default function Member() {
                 {profile.company ? `・${profile.company}` : ""}
               </div>
               {profile.bio && <p className="text-sm text-gray-600 mt-2">{profile.bio}</p>}
-              <div className="flex gap-2 mt-3">
+            </div>
+
+            {/* 我的人脈條件：註冊時填的內容，放在最上面，直接可改 */}
+            <div className="bg-white rounded-2xl border border-purple-100 p-4 shadow-sm">
+              <div className="flex items-center justify-between mb-3">
+                <div className="text-sm font-bold text-purple-900">我的人脈條件</div>
                 <button
                   onClick={() => router.push("/onboarding?edit=1")}
-                  className="flex-1 border border-purple-600 text-purple-600 text-sm font-medium py-2 rounded-lg"
+                  className="text-xs bg-purple-600 text-white font-semibold px-3 py-1.5 rounded-lg"
                 >
-                  編輯檔案
+                  編輯
                 </button>
-                <button
-                  disabled={toggling}
-                  onClick={toggleActive}
-                  className="flex-1 border border-gray-200 text-gray-500 text-sm py-2 rounded-lg disabled:opacity-50"
-                >
-                  {toggling ? "處理中..." : profile.is_active ? "暫停媒合" : "重新啟用"}
-                </button>
+              </div>
+
+              <div className="flex gap-3 mb-4">
+                <div className="w-1 rounded-full bg-gold-600 shrink-0" />
+                <div className="flex-1 min-w-0">
+                  <div className="text-[11px] font-semibold text-gold-900 mb-1.5">我想找</div>
+                  <Tags items={profile.seek_industries || []} level={profile.seek_level} />
+                  <div className="mt-1.5">
+                    <Tags items={[...(profile.seek_regions || []), ...(profile.seek_departments || [])]} level={null} />
+                  </div>
+                  {profile.seek_note && (
+                    <p className="text-xs text-gray-600 mt-2 leading-relaxed">「{profile.seek_note}」</p>
+                  )}
+                </div>
+              </div>
+
+              <div className="flex gap-3">
+                <div className="w-1 rounded-full bg-purple-600 shrink-0" />
+                <div className="flex-1 min-w-0">
+                  <div className="text-[11px] font-semibold text-purple-600 mb-1.5">我能介紹</div>
+                  {profile.has_offer ? (
+                    <>
+                      <Tags items={profile.offer_industries || []} level={profile.offer_level} />
+                      <div className="mt-1.5">
+                        <Tags items={[...(profile.offer_regions || []), ...(profile.offer_departments || [])]} level={null} />
+                      </div>
+                      {profile.offer_note && (
+                        <p className="text-xs text-gray-600 mt-2 leading-relaxed">「{profile.offer_note}」</p>
+                      )}
+                    </>
+                  ) : (
+                    <button
+                      onClick={() => router.push("/onboarding?edit=1")}
+                      className="text-xs text-purple-600 underline"
+                    >
+                      尚未填寫，點此補上
+                    </button>
+                  )}
+                </div>
               </div>
             </div>
 
+            <button
+              onClick={() => router.push("/discover")}
+              className="w-full bg-gold-600 text-purple-900 font-semibold py-3 rounded-xl"
+            >
+              查看為我推薦的人脈 →
+            </button>
+
             {!profile.is_active && (
               <div className="bg-gold-50 border border-gold-100 text-gold-900 text-xs rounded-xl p-3 leading-relaxed">
-                你的檔案目前已停用，其他會員看不到你。要重新被找到，按上方「重新啟用」。
+                你的檔案目前已停用，其他會員看不到你。要重新被找到，按最下方「重新啟用」。
               </div>
             )}
 
@@ -305,37 +349,21 @@ export default function Member() {
               </div>
             )}
 
-            {/* 條件摘要 */}
-            <div className="bg-white rounded-2xl border border-gray-100 p-4 shadow-sm">
-              <div className="text-xs text-gray-400 mb-1">我想找的人脈</div>
-              <Tags items={profile.seek_industries || []} level={profile.seek_level} />
-              <div className="mt-2">
-                <Tags items={[...(profile.seek_regions || []), ...(profile.seek_departments || [])]} level={null} />
+            {/* 帳號狀態：暫停／重新啟用 */}
+            <div className="bg-white rounded-2xl border border-gray-100 p-4 shadow-sm flex items-center justify-between gap-3">
+              <div className="text-xs text-gray-500 leading-relaxed">
+                {profile.is_active
+                  ? "你的檔案目前在媒合中，其他會員找得到你"
+                  : "你的檔案已停用，其他會員看不到你"}
               </div>
-              {profile.seek_note && <p className="text-xs text-gray-500 mt-2">「{profile.seek_note}」</p>}
+              <button
+                disabled={toggling}
+                onClick={toggleActive}
+                className="shrink-0 border border-gray-200 text-gray-500 text-xs py-2 px-3 rounded-lg disabled:opacity-50"
+              >
+                {toggling ? "處理中..." : profile.is_active ? "暫停媒合" : "重新啟用"}
+              </button>
             </div>
-
-            <div className="bg-white rounded-2xl border border-gray-100 p-4 shadow-sm">
-              <div className="text-xs text-gray-400 mb-1">我能介紹的人脈</div>
-              {profile.has_offer ? (
-                <>
-                  <Tags items={profile.offer_industries || []} level={profile.offer_level} />
-                  <div className="mt-2">
-                    <Tags items={[...(profile.offer_regions || []), ...(profile.offer_departments || [])]} level={null} />
-                  </div>
-                  {profile.offer_note && <p className="text-xs text-gray-500 mt-2">「{profile.offer_note}」</p>}
-                </>
-              ) : (
-                <span className="text-xs text-gray-400">尚未填寫</span>
-              )}
-            </div>
-
-            <button
-              onClick={() => router.push("/discover")}
-              className="w-full bg-gold-600 text-purple-900 font-semibold py-3 rounded-xl"
-            >
-              查看為我推薦的人脈 →
-            </button>
           </div>
         )}
       </div>

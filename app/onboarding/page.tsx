@@ -255,6 +255,7 @@ export default function Onboarding() {
   const [referralCode, setReferralCode] = useState("");
 
   const [editMode, setEditMode] = useState(false);
+  const [fromInvite, setFromInvite] = useState(false);
   const [phase, setPhase] = useState<Phase>("form");
   const [resent, setResent] = useState(false);
 
@@ -268,6 +269,7 @@ export default function Onboarding() {
     if (refParam) {
       const code = refParam.trim().toUpperCase();
       setReferralCode(code);
+      setFromInvite(true);
       try {
         localStorage.setItem(REF_KEY, code);
       } catch {}
@@ -702,6 +704,20 @@ export default function Onboarding() {
         {notice && (
           <div className="bg-gold-50 border border-gold-100 text-gold-900 text-xs rounded-xl p-3 mb-4 leading-relaxed">
             {notice}
+          </div>
+        )}
+
+        {fromInvite && !editMode && stepIndex === 0 && (
+          <div className="bg-gradient-to-br from-purple-600 to-purple-900 text-white rounded-2xl p-4 mb-5 shadow-lg">
+            <div className="text-xs text-purple-100 mb-1">你是透過朋友的邀請連結來的</div>
+            <div className="text-sm leading-relaxed">
+              ExKey 幫業務與廠商配對想認識的合作對象，配對後才解鎖聯絡方式。完成註冊，你和邀請你的朋友各得{" "}
+              <span className="font-bold text-gold-400">5 點</span>。推薦碼已自動帶入：
+              <span className="font-bold tracking-widest text-gold-400 ml-1">{referralCode}</span>
+            </div>
+            <div className="text-[11px] text-purple-100/80 mt-2">
+              由關鍵人脈資訊股份有限公司經營・<a href="/terms" target="_blank" rel="noopener noreferrer" className="underline">服務條款</a>
+            </div>
           </div>
         )}
 

@@ -36,6 +36,14 @@ interface TopupRow {
   amount_ntd: number;
   bank_last5: string | null;
 }
+interface ReferralRow {
+  created_at: string;
+  referrer: string;
+  referrer_email: string | null;
+  referred: string;
+  referred_email: string | null;
+  awarded: boolean;
+}
 
 function fmtDate(iso: string): string {
   return iso.slice(0, 10);
@@ -50,15 +58,17 @@ export default function Admin() {
   const [members, setMembers] = useState<MemberRow[]>([]);
   const [unlockLogs, setUnlockLogs] = useState<UnlockRow[]>([]);
   const [topups, setTopups] = useState<TopupRow[]>([]);
+  const [referrals, setReferrals] = useState<ReferralRow[]>([]);
   const [busyId, setBusyId] = useState<string | null>(null);
   const [myEmail, setMyEmail] = useState("");
 
   async function loadAll() {
-    const [ov, mem, ul, tp] = await Promise.all([
+    const [ov, mem, ul, tp, rf] = await Promise.all([
       supabase.rpc("admin_overview"),
       supabase.rpc("admin_members"),
       supabase.rpc("admin_unlock_logs"),
       supabase.rpc("admin_topup_requests"),
+      supabase.rpc("admin_referrals"),
     ]);
     if (ov.error || mem.error || ul.error || tp.error) {
       setDenied(true);
@@ -69,6 +79,8 @@ export default function Admin() {
     setMembers((mem.data as MemberRow[]) || []);
     setUnlockLogs((ul.data as UnlockRow[]) || []);
     setTopups((tp.data as TopupRow[]) || []);
+    // 推薦紀錄函式還沒建（SQL 沒跑）時不擋整頁
+    setReferrals(rf.error ? [] : ((rf.data as ReferralRow[]) || []));
     setLoading(false);
   }
 
@@ -273,10 +285,10 @@ export default function Admin() {
                       <div className="flex flex-col gap-1">
                         <button
                           disabled={busyId === m.id}
-                          onClick={() => addPoints(m.id, 100, "儲值 NT$500")}
+                          onClick={() => addPoints(m.id, 100, "管理員贈點")}
                           className="text-xs bg-gold-600 disabled:bg-gray-300 text-purple-900 font-semibold px-3 py-1.5 rounded-lg"
                         >
-                          +100（儲值）
+                          +100（贈點）
                         </button>
                         <button
                           disabled={busyId === m.id}
@@ -290,6 +302,36 @@ export default function Admin() {
                   </div>
                 ))}
               </div>
+            </div>
+
+            {/* 推薦紀錄 */}
+            <div className="bg-white rounded-2xl border border-gray-100 p-4 shadow-sm">
+              <div className="text-sm font-semibold text-gray-900 mb-3">推薦紀錄（{referrals.length}）</div>
+              {referrals.length === 0 ? (
+                <p className="text-xs text-gray-400">尚無紀錄</p>
+              ) : (
+                <div className="space-y-2">
+                  {referrals.map((r, i) => (
+                    <div key={i} className="text-xs border-b border-gray-50 pb-2">
+                      <div className="flex justify-between">
+                        <span className="text-gray-600">
+                          <span className="font-medium text-gray-900">{r.referrer}</span> 推薦了{" "}
+                          <span className="font-medium text-gray-900">{r.referred}</span>
+                        </span>
+                        <span className="text-gray-400">{fmtDate(r.created_at)}</span>
+                      </div>
+                      <div className="flex justify-between mt-0.5 text-gray-400">
+                        <span className="truncate">
+                          {r.referrer_email || "—"} → {r.referred_email || "—"}
+                        </span>
+                        <span className={r.awarded ? "text-green-600" : "text-gray-400"}>
+                          {r.awarded ? "已發點" : "超過上限未發點"}
+                        </span>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
             </div>
 
             {/* 解鎖流水 */}

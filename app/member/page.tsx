@@ -27,24 +27,57 @@ function buildInviteMessage(senderName: string, code: string, link: string): str
   ].join("\n");
 }
 
-// 手機上開原生分享面板（LINE、訊息等），不支援的環境就複製到剪貼簿
+// 手機：開原生分享面板（LINE、訊息等）；電腦：直接複製到剪貼簿。
+// 電腦版瀏覽器的分享面板常叫不出來又回報「取消」，所以電腦不走那條。
+// 複製也被擋的話回傳 failed，由畫面把整段文字秀出來讓人手動複製。
 async function shareOrCopy(text: string): Promise<"shared" | "copied" | "failed"> {
-  if (typeof navigator !== "undefined" && "share" in navigator) {
+  const isMobile =
+    typeof navigator !== "undefined" && /Android|iPhone|iPad|iPod/i.test(navigator.userAgent);
+  if (isMobile && typeof navigator !== "undefined" && "share" in navigator) {
     try {
       await (navigator as Navigator & { share: (d: { text: string }) => Promise<void> }).share({ text });
       return "shared";
-    } catch (e) {
-      // 使用者取消分享時不當成失敗，也不 fallback 複製
-      if ((e as { name?: string }).name === "AbortError") return "failed";
+    } catch {
+      // 面板叫不出來或使用者取消，往下改用複製
     }
   }
   try {
     await navigator.clipboard.writeText(text);
     return "copied";
-  } catch {
-    return "failed";
-  }
+  } catch {}
+  try {
+    const ta = document.createElement("textarea");
+    ta.value = text;
+    ta.setAttribute("readonly", "");
+    ta.style.position = "fixed";
+    ta.style.opacity = "0";
+    document.body.appendChild(ta);
+    ta.select();
+    const ok = document.execCommand("copy");
+    document.body.removeChild(ta);
+    if (ok) return "copied";
+  } catch {}
+  return "failed";
 }
+// 複製失敗時的備援：把訊息整段秀出來，讓人自己全選複製
+function InviteTextPanel({ text, onClose }: { text: string; onClose: () => void }) {
+  return (
+    <div className="mt-3 bg-white text-gray-800 rounded-xl p-3 border border-gold-100">
+      <div className="text-xs text-gray-500 mb-2">瀏覽器不讓我們自動複製。點下面的文字框 → 全選 → 複製，貼給朋友即可。</div>
+      <textarea
+        readOnly
+        value={text}
+        rows={9}
+        onFocus={(e) => e.currentTarget.select()}
+        className="w-full text-xs leading-relaxed p-2 rounded-lg border border-gray-200 bg-gray-50 resize-none"
+      />
+      <button onClick={onClose} className="mt-2 text-xs text-gray-500 underline">
+        關閉
+      </button>
+    </div>
+  );
+}
+
 
 interface ReferralInfo {
   code: string | null;
@@ -64,6 +97,7 @@ export default function Member() {
   const [referral, setReferral] = useState<ReferralInfo | null>(null);
   const [copied, setCopied] = useState<"code" | "link" | null>(null);
   const [toggling, setToggling] = useState(false);
+  const [inviteFallback, setInviteFallback] = useState<string | null>(null);
 
   async function loadProfile(uid: string) {
     const { data } = await supabase
@@ -136,10 +170,14 @@ export default function Member() {
 
   async function shareInvite() {
     if (!referral?.code || !profile) return;
-    const r = await shareOrCopy(buildInviteMessage(profile.name, referral.code, shareLink));
+    const text = buildInviteMessage(profile.name, referral.code, shareLink);
+    const r = await shareOrCopy(text);
     if (r === "copied") {
+      setInviteFallback(null);
       setCopied("link");
       setTimeout(() => setCopied(null), 1500);
+    } else if (r === "failed") {
+      setInviteFallback(text);
     }
   }
 
@@ -346,6 +384,7 @@ export default function Member() {
                 >
                   只複製純連結
                 </button>
+                {inviteFallback && <InviteTextPanel text={inviteFallback} onClose={() => setInviteFallback(null)} />}
               </div>
             )}
 

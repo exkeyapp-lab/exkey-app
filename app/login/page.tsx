@@ -5,6 +5,8 @@ import { useRouter } from "next/navigation";
 import Link from "next/link";
 import { createClient } from "@/lib/supabase";
 
+const SITE_URL = "https://exkey-app.vercel.app";
+
 type Mode = "login" | "register" | "forgot";
 
 export default function Login() {
@@ -17,6 +19,8 @@ export default function Login() {
   const [error, setError] = useState("");
   const [sent, setSent] = useState(false);
   const [agreedTerms, setAgreedTerms] = useState(false);
+  const [needConfirm, setNeedConfirm] = useState(false);
+  const [resent, setResent] = useState(false);
 
   // Google 登入：導向 Google 授權頁，完成後回到會員專區
   async function handleGoogle() {
@@ -24,7 +28,7 @@ export default function Login() {
     setError("");
     const { error: err } = await supabase.auth.signInWithOAuth({
       provider: "google",
-      options: { redirectTo: "https://exkey-app.vercel.app/member" },
+      options: { redirectTo: `${SITE_URL}/member` },
     });
     if (err) {
       setError("Google 登入失敗：" + err.message);
@@ -32,13 +36,34 @@ export default function Login() {
     }
   }
 
+  // 重寄驗證信（註冊後沒收到、或登入時發現還沒驗證）
+  async function resendConfirm() {
+    setError("");
+    setResent(false);
+    const { error: err } = await supabase.auth.resend({
+      type: "signup",
+      email,
+      options: { emailRedirectTo: `${SITE_URL}/onboarding` },
+    });
+    if (err) {
+      setError(
+        err.message.toLowerCase().includes("rate limit")
+          ? "短時間內寄送次數過多，請稍後再試"
+          : "重寄失敗：" + err.message
+      );
+      return;
+    }
+    setResent(true);
+  }
+
   async function handleSubmit() {
     setBusy(true);
     setError("");
+    setNeedConfirm(false);
 
     if (mode === "forgot") {
       const { error: err } = await supabase.auth.resetPasswordForEmail(email, {
-        redirectTo: "https://exkey-app.vercel.app/reset-password",
+        redirectTo: `${SITE_URL}/reset-password`,
       });
       setBusy(false);
       if (err) {
@@ -54,13 +79,33 @@ export default function Login() {
     }
 
     if (mode === "register") {
-      const { error: err } = await supabase.auth.signUp({ email, password });
+      const { data, error: err } = await supabase.auth.signUp({
+        email,
+        password,
+        options: { emailRedirectTo: `${SITE_URL}/onboarding` },
+      });
       if (err) {
+        const m = err.message.toLowerCase();
         setError(
-          err.message.includes("already registered")
+          m.includes("already registered")
             ? "這個 Email 已經註冊過了，請直接登入"
+            : m.includes("rate limit") || m.includes("security purposes")
+            ? "短時間內嘗試次數過多，請等幾分鐘再試"
             : "註冊失敗：" + err.message
         );
+        setBusy(false);
+        return;
+      }
+      // Supabase 對已存在的 Email 會回傳一個沒有 identities 的假成功
+      const u = data.user;
+      if (u && Array.isArray(u.identities) && u.identities.length === 0) {
+        setError("這個 Email 已經註冊過了，請直接登入");
+        setBusy(false);
+        return;
+      }
+      if (!data.session) {
+        // 需要信箱驗證
+        setSent(true);
         setBusy(false);
         return;
       }
@@ -70,11 +115,15 @@ export default function Login() {
 
     const { error: err } = await supabase.auth.signInWithPassword({ email, password });
     if (err) {
-      setError(
-        err.message.includes("Invalid login credentials")
-          ? "Email 或密碼錯誤"
-          : "登入失敗：" + err.message
-      );
+      const m = err.message.toLowerCase();
+      if (m.includes("not confirmed")) {
+        setNeedConfirm(true);
+        setError("這個 Email 還沒完成驗證，請先到信箱點驗證連結");
+      } else if (m.includes("invalid login credentials")) {
+        setError("Email 或密碼錯誤");
+      } else {
+        setError("登入失敗：" + err.message);
+      }
       setBusy(false);
       return;
     }
@@ -91,6 +140,8 @@ export default function Login() {
     setMode(m);
     setError("");
     setSent(false);
+    setNeedConfirm(false);
+    setResent(false);
   }
 
   return (
@@ -106,7 +157,7 @@ export default function Login() {
         </div>
 
         <div className="bg-white rounded-2xl border border-gray-100 p-6 shadow-sm">
-          {mode !== "forgot" && (
+          {mode !== "forgot" && !sent && (
             <div className="flex gap-2 mb-6">
               <button
                 onClick={() => switchMode("login")}
@@ -127,7 +178,7 @@ export default function Login() {
             </div>
           )}
 
-          {mode !== "forgot" && (
+          {mode !== "forgot" && !sent && (
             <>
               <button
                 onClick={handleGoogle}
@@ -163,7 +214,7 @@ export default function Login() {
             </>
           )}
 
-          {mode === "forgot" && (
+          {mode === "forgot" && !sent && (
             <div className="mb-6">
               <h1 className="text-lg font-bold text-gray-900">重設密碼</h1>
               <p className="text-xs text-gray-500 mt-1">
@@ -172,20 +223,44 @@ export default function Login() {
             </div>
           )}
 
-          {mode === "forgot" && sent ? (
+          {/* 忘記密碼：已寄出 */}
+          {mode === "forgot" && sent && (
             <div className="text-center py-4">
               <p className="text-sm text-gray-700 mb-2">重設信已寄出</p>
               <p className="text-xs text-gray-500 mb-4">
                 請到 {email} 收信（找不到請翻垃圾信件匣），點信中連結設定新密碼
               </p>
-              <button
-                onClick={() => switchMode("login")}
-                className="text-sm text-purple-600 underline"
-              >
+              <button onClick={() => switchMode("login")} className="text-sm text-purple-600 underline">
                 回登入頁
               </button>
             </div>
-          ) : (
+          )}
+
+          {/* 註冊：驗證信已寄出 */}
+          {mode === "register" && sent && (
+            <div className="py-2">
+              <h1 className="text-lg font-bold text-purple-900 mb-2">驗證信已寄出</h1>
+              <p className="text-sm text-gray-600 leading-relaxed mb-4">
+                已寄到 <span className="font-semibold text-gray-900">{email}</span>
+                。打開信件、點裡面的連結完成驗證，接著就能建立你的人脈檔案。找不到信請翻垃圾信件匣。
+              </p>
+              {error && <p className="text-sm text-red-600 mb-3">{error}</p>}
+              {resent && !error && <p className="text-sm text-green-600 mb-3">已重新寄出</p>}
+              <button
+                onClick={() => {
+                  switchMode("login");
+                }}
+                className="w-full bg-gold-600 text-purple-900 font-semibold py-3 rounded-xl mb-3"
+              >
+                我已驗證，去登入
+              </button>
+              <button onClick={resendConfirm} className="w-full text-sm text-purple-600 underline py-2">
+                沒收到？重寄驗證信
+              </button>
+            </div>
+          )}
+
+          {!sent && (
             <div className="space-y-4">
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-1">Email</label>
@@ -233,6 +308,17 @@ export default function Login() {
               )}
 
               {error && <p className="text-sm text-red-600">{error}</p>}
+              {needConfirm && (
+                <div className="bg-gold-50 border border-gold-100 rounded-xl p-3">
+                  {resent ? (
+                    <p className="text-xs text-green-700">驗證信已重新寄出，請到 {email} 收信</p>
+                  ) : (
+                    <button onClick={resendConfirm} className="text-xs text-purple-600 underline">
+                      沒收到驗證信？點此重寄
+                    </button>
+                  )}
+                </div>
+              )}
 
               <button
                 disabled={disabled}
@@ -244,7 +330,7 @@ export default function Login() {
                   : mode === "login"
                   ? "登入"
                   : mode === "register"
-                  ? "註冊並開始"
+                  ? "註冊並寄驗證信"
                   : "寄送重設信"}
               </button>
 
@@ -261,7 +347,7 @@ export default function Login() {
                 {mode === "login"
                   ? "還沒有帳號？點上方「註冊新帳號」"
                   : mode === "register"
-                  ? "勾選上方同意條款後即可註冊"
+                  ? "勾選上方同意條款後即可註冊，送出後會寄驗證信到你的 Email"
                   : ""}
               </p>
               {mode === "forgot" && (

@@ -8,6 +8,44 @@ import { levelLabel, PUBLIC_PROFILE_COLUMNS, type PublicProfile } from "@/lib/ty
 
 const SITE_URL = "https://exkey-app.vercel.app";
 
+
+// 分享訊息：先講清楚是誰、這是什麼、誰經營，最後才是推薦碼和連結，對方才不會當詐騙
+function buildInviteMessage(senderName: string, code: string, link: string): string {
+  return [
+    `${senderName} 邀請你加入 ExKey 關鍵人脈`,
+    "",
+    "ExKey 是一個讓業務與廠商互相介紹人脈的平台：依產業、地區、部門、職級幫你配對想認識的合作對象，配對後才解鎖聯絡方式。",
+    "",
+    `用我的推薦碼註冊，我們各得 5 點（可用來解鎖聯絡方式）`,
+    `推薦碼：${code}`,
+    "",
+    "註冊連結（推薦碼會自動帶入）：",
+    link,
+    "",
+    "由關鍵人脈資訊股份有限公司經營",
+    `服務條款：${SITE_URL}/terms`,
+  ].join("\n");
+}
+
+// 手機上開原生分享面板（LINE、訊息等），不支援的環境就複製到剪貼簿
+async function shareOrCopy(text: string): Promise<"shared" | "copied" | "failed"> {
+  if (typeof navigator !== "undefined" && "share" in navigator) {
+    try {
+      await (navigator as Navigator & { share: (d: { text: string }) => Promise<void> }).share({ text });
+      return "shared";
+    } catch (e) {
+      // 使用者取消分享時不當成失敗，也不 fallback 複製
+      if ((e as { name?: string }).name === "AbortError") return "failed";
+    }
+  }
+  try {
+    await navigator.clipboard.writeText(text);
+    return "copied";
+  } catch {
+    return "failed";
+  }
+}
+
 interface ReferralInfo {
   code: string | null;
   referred_count: number;
@@ -94,6 +132,15 @@ export default function Member() {
       setCopied(which);
       setTimeout(() => setCopied(null), 1500);
     } catch {}
+  }
+
+  async function shareInvite() {
+    if (!referral?.code || !profile) return;
+    const r = await shareOrCopy(buildInviteMessage(profile.name, referral.code, shareLink));
+    if (r === "copied") {
+      setCopied("link");
+      setTimeout(() => setCopied(null), 1500);
+    }
   }
 
   function Tags({ items, level }: { items: string[]; level: number | null }) {
@@ -241,12 +288,20 @@ export default function Member() {
                   已成功推薦 <span className="font-bold text-gold-400">{referral.referred_count}</span> / {referral.cap} 人
                 </div>
                 <button
-                  onClick={() => copyText(shareLink, "link")}
+                  onClick={shareInvite}
                   className="w-full mt-3 bg-gold-600 text-purple-900 text-sm font-semibold py-2.5 rounded-lg"
                 >
-                  {copied === "link" ? "邀請連結已複製" : "複製邀請連結"}
+                  {copied === "link" ? "邀請訊息已複製，貼給朋友即可" : "分享邀請給同業"}
                 </button>
-                <div className="text-[10px] text-purple-100/80 mt-2 break-all">{shareLink}</div>
+                <p className="text-[11px] text-purple-100/90 mt-2 leading-relaxed">
+                  會帶一段說明文字（誰邀請、平台在做什麼、誰經營）＋你的推薦碼與連結，對方才不會當成詐騙。
+                </p>
+                <button
+                  onClick={() => copyText(shareLink, "link")}
+                  className="w-full mt-2 text-[11px] text-purple-100/80 underline"
+                >
+                  只複製純連結
+                </button>
               </div>
             )}
 

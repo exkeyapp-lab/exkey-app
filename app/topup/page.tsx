@@ -116,7 +116,7 @@ export default function Topup() {
         {!loading && (
           <div className="space-y-4">
             {/* 方案卡 */}
-            <div className="rounded-2xl bg-gradient-to-br from-purple-600 to-purple-900 text-white p-5 shadow-lg">
+            <div className="rounded-2xl ek-rich text-white p-5 overflow-hidden">
               <div className="text-xs text-purple-100 mb-1">點數方案</div>
               <div className="flex items-end gap-2">
                 <div className="text-4xl font-bold text-gold-400">{PACK_POINTS}</div>

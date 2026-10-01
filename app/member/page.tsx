@@ -79,6 +79,34 @@ function InviteTextPanel({ text, onClose }: { text: string; onClose: () => void 
 }
 
 
+interface UnlockedRow {
+  id: string;
+  name: string;
+  company: string | null;
+  role: string;
+  line_id: string | null;
+  is_active: boolean;
+  created_at: string;
+}
+
+interface FinderRow {
+  name: string | null;
+  company: string | null;
+  role: string | null;
+  seek_industries: string[] | null;
+  seek_regions: string[] | null;
+  seek_departments: string[] | null;
+  seek_level: number | null;
+  seek_note: string | null;
+  created_at: string;
+}
+
+const LIST_PREVIEW = 5;
+
+function roleText(r: string | null | undefined): string {
+  return r === "sales" ? "業務" : r === "vendor" ? "廠商" : r === "both" ? "業務＋廠商" : "";
+}
+
 interface ReferralInfo {
   code: string | null;
   referred_count: number;
@@ -98,6 +126,11 @@ export default function Member() {
   const [copied, setCopied] = useState<"code" | "link" | null>(null);
   const [toggling, setToggling] = useState(false);
   const [inviteFallback, setInviteFallback] = useState<string | null>(null);
+  const [myUnlocks, setMyUnlocks] = useState<UnlockedRow[]>([]);
+  const [finders, setFinders] = useState<FinderRow[]>([]);
+  const [showAllUnlocks, setShowAllUnlocks] = useState(false);
+  const [showAllFinders, setShowAllFinders] = useState(false);
+  const [copiedLineId, setCopiedLineId] = useState<string | null>(null);
 
   async function loadProfile(uid: string) {
     const { data } = await supabase
@@ -131,6 +164,11 @@ export default function Member() {
 
       const { data: ref } = await supabase.rpc("my_referral");
       if (ref && typeof ref === "object") setReferral(ref as ReferralInfo);
+
+      // 解鎖紀錄：函式還沒建（SQL 沒跑）時不擋整頁
+      const [mu, wu] = await Promise.all([supabase.rpc("my_unlocks"), supabase.rpc("who_unlocked_me")]);
+      if (!mu.error && Array.isArray(mu.data)) setMyUnlocks(mu.data as UnlockedRow[]);
+      if (!wu.error && Array.isArray(wu.data)) setFinders(wu.data as FinderRow[]);
 
       setLoading(false);
     }
@@ -326,6 +364,120 @@ export default function Member() {
             >
               查看為我推薦的人脈 →
             </button>
+
+            {/* 我找過的人 */}
+            <div className="bg-white rounded-2xl border border-gray-100 p-4 shadow-sm">
+              <div className="flex items-center justify-between mb-1">
+                <div className="text-sm font-bold text-purple-900">我找過的人</div>
+                <span className="text-xs text-gray-400">{myUnlocks.length} 位</span>
+              </div>
+              <p className="text-[11px] text-gray-400 mb-3">你解鎖過的聯絡方式都留在這裡，永久免費查看</p>
+              {myUnlocks.length === 0 ? (
+                <p className="text-xs text-gray-400 py-2">還沒有解鎖過任何人</p>
+              ) : (
+                <div className="divide-y divide-gray-50">
+                  {(showAllUnlocks ? myUnlocks : myUnlocks.slice(0, LIST_PREVIEW)).map((u) => (
+                    <div key={u.id} className="py-3 flex items-center gap-3">
+                      <div className="w-10 h-10 rounded-xl ek-rich-sm flex items-center justify-center font-bold shrink-0">
+                        {u.name ? u.name[0] : "?"}
+                      </div>
+                      <div className="flex-1 min-w-0">
+                        <div className="text-sm font-semibold text-gray-900 truncate">
+                          {u.name}
+                          {!u.is_active && <span className="ml-1.5 text-[10px] text-gray-400 font-normal">已停用</span>}
+                        </div>
+                        <div className="text-xs text-gray-500 truncate">
+                          {[roleText(u.role), u.company].filter(Boolean).join("・")}
+                        </div>
+                        <div className="text-xs text-purple-600 font-medium mt-0.5 truncate">
+                          LINE：{u.line_id || "（未提供）"}
+                        </div>
+                      </div>
+                      <div className="flex flex-col items-end gap-1 shrink-0">
+                        <span className="text-[10px] text-gray-400">{u.created_at.slice(0, 10)}</span>
+                        {u.line_id && (
+                          <button
+                            onClick={async () => {
+                              try {
+                                await navigator.clipboard.writeText(u.line_id || "");
+                                setCopiedLineId(u.id);
+                                setTimeout(() => setCopiedLineId(null), 1500);
+                              } catch {}
+                            }}
+                            className="text-[11px] bg-gold-600 text-purple-900 font-semibold px-2.5 py-1 rounded-lg"
+                          >
+                            {copiedLineId === u.id ? "已複製" : "複製"}
+                          </button>
+                        )}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+              {myUnlocks.length > LIST_PREVIEW && (
+                <button
+                  onClick={() => setShowAllUnlocks((v) => !v)}
+                  className="w-full mt-2 text-xs text-purple-600 underline"
+                >
+                  {showAllUnlocks ? "收起" : `顯示全部 ${myUnlocks.length} 位`}
+                </button>
+              )}
+            </div>
+
+            {/* 找過我的人 */}
+            <div className="bg-white rounded-2xl border border-gray-100 p-4 shadow-sm">
+              <div className="flex items-center justify-between mb-1">
+                <div className="text-sm font-bold text-purple-900">找過我的人</div>
+                <span className="text-xs text-gray-400">{finders.length} 位</span>
+              </div>
+              <p className="text-[11px] text-gray-400 mb-3">這些人解鎖了你的 LINE，可能會主動加你</p>
+              {finders.length === 0 ? (
+                <p className="text-xs text-gray-400 py-2">還沒有人解鎖你的聯絡方式</p>
+              ) : (
+                <div className="divide-y divide-gray-50">
+                  {(showAllFinders ? finders : finders.slice(0, LIST_PREVIEW)).map((f, i) => {
+                    const seekTags = [
+                      ...(f.seek_industries || []),
+                      ...(f.seek_regions || []),
+                      ...(f.seek_departments || []),
+                      ...(f.seek_level ? [levelLabel(f.seek_level)] : []),
+                    ];
+                    return (
+                      <div key={`${f.created_at}-${i}`} className="py-3">
+                        <div className="flex items-center justify-between gap-2">
+                          <div className="min-w-0">
+                            <div className="text-sm font-semibold text-gray-900 truncate">{f.name || "（已刪除的會員）"}</div>
+                            <div className="text-xs text-gray-500 truncate">
+                              {[roleText(f.role), f.company].filter(Boolean).join("・")}
+                            </div>
+                          </div>
+                          <span className="text-[10px] text-gray-400 shrink-0">{f.created_at.slice(0, 10)}</span>
+                        </div>
+                        {seekTags.length > 0 && (
+                          <div className="mt-1.5 flex flex-wrap gap-1 items-center">
+                            <span className="text-[10px] text-gold-900 font-semibold mr-0.5">他想找</span>
+                            {seekTags.slice(0, 5).map((t) => (
+                              <span key={t} className="text-[10px] bg-gold-50 text-gold-900 border border-gold-100 px-1.5 py-0.5 rounded">
+                                {t}
+                              </span>
+                            ))}
+                          </div>
+                        )}
+                        {f.seek_note && <p className="text-[11px] text-gray-500 mt-1">「{f.seek_note}」</p>}
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
+              {finders.length > LIST_PREVIEW && (
+                <button
+                  onClick={() => setShowAllFinders((v) => !v)}
+                  className="w-full mt-2 text-xs text-purple-600 underline"
+                >
+                  {showAllFinders ? "收起" : `顯示全部 ${finders.length} 位`}
+                </button>
+              )}
+            </div>
 
             {!profile.is_active && (
               <div className="bg-gold-50 border border-gold-100 text-gold-900 text-xs rounded-xl p-3 leading-relaxed">

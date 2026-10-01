@@ -61,14 +61,17 @@ export default function Admin() {
   const [referrals, setReferrals] = useState<ReferralRow[]>([]);
   const [busyId, setBusyId] = useState<string | null>(null);
   const [myEmail, setMyEmail] = useState("");
+  const [activeMap, setActiveMap] = useState<Record<string, boolean> | null>(null);
+  const [showInactive, setShowInactive] = useState(false);
 
   async function loadAll() {
-    const [ov, mem, ul, tp, rf] = await Promise.all([
+    const [ov, mem, ul, tp, rf, st] = await Promise.all([
       supabase.rpc("admin_overview"),
       supabase.rpc("admin_members"),
       supabase.rpc("admin_unlock_logs"),
       supabase.rpc("admin_topup_requests"),
       supabase.rpc("admin_referrals"),
+      supabase.rpc("admin_member_status"),
     ]);
     if (ov.error || mem.error || ul.error || tp.error) {
       setDenied(true);
@@ -81,6 +84,12 @@ export default function Admin() {
     setTopups((tp.data as TopupRow[]) || []);
     // 推薦紀錄函式還沒建（SQL 沒跑）時不擋整頁
     setReferrals(rf.error ? [] : ((rf.data as ReferralRow[]) || []));
+    // 停用狀態函式還沒建（SQL 沒跑）時，列表照舊全部顯示
+    if (!st.error && Array.isArray(st.data)) {
+      const map: Record<string, boolean> = {};
+      (st.data as { id: string; is_active: boolean }[]).forEach((r) => (map[r.id] = r.is_active));
+      setActiveMap(map);
+    }
     setLoading(false);
   }
 
@@ -153,6 +162,9 @@ export default function Admin() {
     return out;
   }
 
+  const activeMembers = activeMap ? members.filter((m) => activeMap[m.id] !== false) : members;
+  const inactiveMembers = activeMap ? members.filter((m) => activeMap[m.id] === false) : [];
+
   const countByDay = new Map((overview ? overview.daily : []).map((d) => [d.day, d.count]));
   const recentDays: DailyCount[] = lastNDays(14).map((day) => ({
     day,
@@ -192,8 +204,15 @@ export default function Admin() {
             {/* 總覽 */}
             <div className="grid grid-cols-2 gap-4">
               <div className="bg-white rounded-2xl border border-gray-100 p-4 shadow-sm text-center">
-                <div className="text-2xl font-bold text-purple-600">{overview.total_members}</div>
-                <div className="text-xs text-gray-400 mt-1">總會員數</div>
+                <div className="text-2xl font-bold text-purple-600">
+                  {activeMap ? activeMembers.length : overview.total_members}
+                </div>
+                <div className="text-xs text-gray-400 mt-1">
+                  {activeMap ? "媒合中會員" : "總會員數"}
+                  {activeMap && inactiveMembers.length > 0 && (
+                    <span className="block text-[10px] text-gray-300">另有 {inactiveMembers.length} 筆已停用</span>
+                  )}
+                </div>
               </div>
               <div className="bg-white rounded-2xl border border-gray-100 p-4 shadow-sm text-center">
                 <div className="text-2xl font-bold text-gold-900">{overview.total_unlocks}</div>
@@ -265,9 +284,12 @@ export default function Admin() {
 
             {/* 會員列表 */}
             <div className="bg-white rounded-2xl border border-gray-100 p-4 shadow-sm">
-              <div className="text-sm font-semibold text-gray-900 mb-3">會員列表（{members.length}）</div>
+              <div className="text-sm font-semibold text-gray-900 mb-3">
+                {activeMap ? `媒合中會員（${activeMembers.length}）` : `會員列表（${members.length}）`}
+              </div>
+              {activeMembers.length === 0 && <p className="text-xs text-gray-400">目前沒有媒合中的會員</p>}
               <div className="space-y-3">
-                {members.map((m) => (
+                {activeMembers.map((m) => (
                   <div key={m.id} className="border border-gray-100 rounded-xl p-3">
                     <div className="flex items-center justify-between">
                       <div>
@@ -302,6 +324,36 @@ export default function Admin() {
                   </div>
                 ))}
               </div>
+
+              {inactiveMembers.length > 0 && (
+                <div className="mt-4 pt-3 border-t border-gray-100">
+                  <button
+                    onClick={() => setShowInactive((v) => !v)}
+                    className="text-xs text-gray-500 underline"
+                  >
+                    {showInactive ? "收起" : "展開"}已停用的檔案（{inactiveMembers.length}）
+                  </button>
+                  <p className="text-[10px] text-gray-400 mt-1">
+                    已停用的檔案不會出現在任何人的推薦裡，資料保留供對帳
+                  </p>
+                  {showInactive && (
+                    <div className="space-y-2 mt-3">
+                      {inactiveMembers.map((m) => (
+                        <div key={m.id} className="border border-gray-100 rounded-xl p-3 bg-gray-50 opacity-70">
+                          <div className="text-sm text-gray-700">
+                            {m.name}
+                            <span className="ml-2 text-[10px] bg-gray-200 text-gray-500 px-1.5 py-0.5 rounded">已停用</span>
+                          </div>
+                          <div className="text-xs text-gray-500 mt-0.5">{m.email || "（未綁帳號）"}</div>
+                          <div className="text-xs text-gray-400 mt-0.5">
+                            {fmtDate(m.created_at)}・{m.points} 點・被解鎖 {m.unlocked_times} 次
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              )}
             </div>
 
             {/* 推薦紀錄 */}

@@ -104,7 +104,7 @@ export default function Login() {
         return;
       }
       if (!data.session) {
-        // 需要信箱驗證
+        // 資料庫後台若仍開著信箱驗證才會走到這裡
         setSent(true);
         setBusy(false);
         return;
@@ -330,7 +330,7 @@ export default function Login() {
                   : mode === "login"
                   ? "登入"
                   : mode === "register"
-                  ? "註冊並寄驗證信"
+                  ? "註冊"
                   : "寄送重設信"}
               </button>
 
@@ -347,7 +347,7 @@ export default function Login() {
                 {mode === "login"
                   ? "還沒有帳號？點上方「註冊新帳號」"
                   : mode === "register"
-                  ? "勾選上方同意條款後即可註冊，送出後會寄驗證信到你的 Email"
+                  ? "勾選上方同意條款後即可註冊，註冊完接著建立你的人脈檔案"
                   : ""}
               </p>
               {mode === "forgot" && (

@@ -74,7 +74,7 @@ export default function Home() {
               </div>
               <h3 className="font-semibold text-gray-900 mb-2">建立你的檔案</h3>
               <p className="text-sm text-gray-500 leading-relaxed">
-                30 秒填寫身份、產業、地區，告訴系統你是誰、想找誰
+                填寫你的找人脈與介紹人脈，告訴系統你想認識誰、能介紹誰
               </p>
             </div>
 
@@ -83,9 +83,9 @@ export default function Home() {
               <div className="w-14 h-14 bg-purple-100 rounded-full flex items-center justify-center text-purple-600 font-bold text-xl mx-auto mb-4">
                 2
               </div>
-              <h3 className="font-semibold text-gray-900 mb-2">智慧媒合推薦</h3>
+              <h3 className="font-semibold text-gray-900 mb-2">自動媒合</h3>
               <p className="text-sm text-gray-500 leading-relaxed">
-                系統根據產業、地區、人脈層級，自動推薦最適合你的合作對象
+                系統根據產業、地區、部門、層級，自動媒合最適合你的關鍵人脈
               </p>
             </div>
 
@@ -94,9 +94,9 @@ export default function Home() {
               <div className="w-14 h-14 bg-gold-100 rounded-full flex items-center justify-center text-gold-900 font-bold text-xl mx-auto mb-4">
                 3
               </div>
-              <h3 className="font-semibold text-gray-900 mb-2">直接聯繫合作</h3>
+              <h3 className="font-semibold text-gray-900 mb-2">立即連繫</h3>
               <p className="text-sm text-gray-500 leading-relaxed">
-                看到媒合對象的 LINE ID，立即聯繫，談合作不用再繞圈子
+                取得關鍵人脈的 LINE ID，立即連繫，談合作不用再繞圈子
               </p>
             </div>
           </div>

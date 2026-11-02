@@ -36,6 +36,13 @@ interface TopupRow {
   amount_ntd: number;
   bank_last5: string | null;
 }
+interface InvoiceInfo {
+  email: string | null;
+  name: string | null;
+  tax_id: string | null;
+  title: string | null;
+  address: string | null;
+}
 interface ReferralRow {
   created_at: string;
   referrer: string;
@@ -63,15 +70,17 @@ export default function Admin() {
   const [myEmail, setMyEmail] = useState("");
   const [activeMap, setActiveMap] = useState<Record<string, boolean> | null>(null);
   const [showInactive, setShowInactive] = useState(false);
+  const [invoiceByEmail, setInvoiceByEmail] = useState<Record<string, InvoiceInfo>>({});
 
   async function loadAll() {
-    const [ov, mem, ul, tp, rf, st] = await Promise.all([
+    const [ov, mem, ul, tp, rf, st, iv] = await Promise.all([
       supabase.rpc("admin_overview"),
       supabase.rpc("admin_members"),
       supabase.rpc("admin_unlock_logs"),
       supabase.rpc("admin_topup_requests"),
       supabase.rpc("admin_referrals"),
       supabase.rpc("admin_member_status"),
+      supabase.rpc("admin_invoice_info"),
     ]);
     if (ov.error || mem.error || ul.error || tp.error) {
       setDenied(true);
@@ -89,6 +98,14 @@ export default function Admin() {
       const map: Record<string, boolean> = {};
       (st.data as { id: string; is_active: boolean }[]).forEach((r) => (map[r.id] = r.is_active));
       setActiveMap(map);
+    }
+    // 發票資料（SQL 沒跑時不擋整頁）
+    if (!iv.error && Array.isArray(iv.data)) {
+      const map: Record<string, InvoiceInfo> = {};
+      (iv.data as InvoiceInfo[]).forEach((r) => {
+        if (r.email) map[r.email] = r;
+      });
+      setInvoiceByEmail(map);
     }
     setLoading(false);
   }
@@ -216,7 +233,7 @@ export default function Admin() {
               </div>
               <div className="bg-white rounded-2xl border border-gray-100 p-4 shadow-sm text-center">
                 <div className="text-2xl font-bold text-gold-900">{overview.total_unlocks}</div>
-                <div className="text-xs text-gray-400 mt-1">累計解鎖次數</div>
+                <div className="text-xs text-gray-400 mt-1">累計連繫次數</div>
               </div>
             </div>
 
@@ -260,6 +277,16 @@ export default function Admin() {
                       <div className="text-xs text-gray-500 mt-1">
                         NT${t.amount_ntd}・帳號末五碼 {t.bank_last5 || "—"}・{fmtDate(t.created_at)}
                       </div>
+                      {t.email && invoiceByEmail[t.email] ? (
+                        <div className="text-xs text-gray-600 mt-1.5 bg-gold-50 border border-gold-100 rounded-lg p-2 leading-relaxed">
+                          <span className="font-semibold text-gold-900">發票：</span>
+                          {invoiceByEmail[t.email].tax_id ? `統編 ${invoiceByEmail[t.email].tax_id}・` : "個人（無統編）・"}
+                          {invoiceByEmail[t.email].title ? `抬頭 ${invoiceByEmail[t.email].title}・` : ""}
+                          寄至 {invoiceByEmail[t.email].address || "（未填地址）"}
+                        </div>
+                      ) : (
+                        <div className="text-[11px] text-gray-400 mt-1.5">未填發票資料</div>
+                      )}
                       <div className="flex gap-2 mt-2">
                         <button
                           disabled={busyId === t.id}
@@ -301,7 +328,7 @@ export default function Admin() {
                         </div>
                         <div className="text-xs text-gray-500 mt-0.5">{m.email || "（未綁帳號）"}</div>
                         <div className="text-xs text-gray-400 mt-0.5">
-                          {fmtDate(m.created_at)}・{m.points} 點・被解鎖 {m.unlocked_times} 次
+                          {fmtDate(m.created_at)}・{m.points} 點・被連繫 {m.unlocked_times} 次
                         </div>
                       </div>
                       <div className="flex flex-col gap-1">
@@ -334,7 +361,7 @@ export default function Admin() {
                     {showInactive ? "收起" : "展開"}已停用的檔案（{inactiveMembers.length}）
                   </button>
                   <p className="text-[10px] text-gray-400 mt-1">
-                    已停用的檔案不會出現在任何人的推薦裡，資料保留供對帳
+                    已停用的檔案不會出現在任何人的媒合名單裡，資料保留供對帳
                   </p>
                   {showInactive && (
                     <div className="space-y-2 mt-3">
@@ -346,7 +373,7 @@ export default function Admin() {
                           </div>
                           <div className="text-xs text-gray-500 mt-0.5">{m.email || "（未綁帳號）"}</div>
                           <div className="text-xs text-gray-400 mt-0.5">
-                            {fmtDate(m.created_at)}・{m.points} 點・被解鎖 {m.unlocked_times} 次
+                            {fmtDate(m.created_at)}・{m.points} 點・被連繫 {m.unlocked_times} 次
                           </div>
                         </div>
                       ))}
@@ -388,7 +415,7 @@ export default function Admin() {
 
             {/* 解鎖流水 */}
             <div className="bg-white rounded-2xl border border-gray-100 p-4 shadow-sm">
-              <div className="text-sm font-semibold text-gray-900 mb-3">解鎖紀錄（近 100 筆）</div>
+              <div className="text-sm font-semibold text-gray-900 mb-3">立即連繫紀錄（近 100 筆）</div>
               {unlockLogs.length === 0 ? (
                 <p className="text-xs text-gray-400">尚無紀錄</p>
               ) : (
@@ -396,7 +423,7 @@ export default function Admin() {
                   {unlockLogs.map((u, i) => (
                     <div key={i} className="text-xs text-gray-600 flex justify-between border-b border-gray-50 pb-1.5">
                       <span>
-                        <span className="font-medium">{u.unlocker_name}</span> 解鎖了{" "}
+                        <span className="font-medium">{u.unlocker_name}</span> 連繫了{" "}
                         <span className="font-medium">{u.target_name}</span>
                       </span>
                       <span className="text-gray-400">{fmtDate(u.created_at)}</span>

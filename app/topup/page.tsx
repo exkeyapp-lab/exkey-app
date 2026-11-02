@@ -40,6 +40,10 @@ export default function Topup() {
   const [error, setError] = useState("");
   const [done, setDone] = useState(false);
   const [history, setHistory] = useState<TopupRow[]>([]);
+  // 發票資料：存在會員檔案上，下次加值自動帶入
+  const [taxId, setTaxId] = useState("");
+  const [invTitle, setInvTitle] = useState("");
+  const [invAddress, setInvAddress] = useState("");
 
   async function loadHistory() {
     const { data } = await supabase.rpc("my_topup_requests");
@@ -55,6 +59,13 @@ export default function Topup() {
       }
       const { data: wallet } = await supabase.rpc("get_my_wallet");
       if (wallet && typeof wallet.points === "number") setPoints(wallet.points);
+      const { data: inv } = await supabase.rpc("my_invoice");
+      if (inv && typeof inv === "object") {
+        const i = inv as { tax_id: string | null; title: string | null; address: string | null };
+        setTaxId(i.tax_id || "");
+        setInvTitle(i.title || "");
+        setInvAddress(i.address || "");
+      }
       await loadHistory();
       setLoading(false);
     }
@@ -62,11 +73,21 @@ export default function Topup() {
   }, []);
 
   const amount = qty * PACK_PRICE;
-  const canSubmit = agreed && /^\d{5}$/.test(last5) && !busy;
+  const taxOk = taxId === "" || /^\d{8}$/.test(taxId);
+  const canSubmit = agreed && /^\d{5}$/.test(last5) && invAddress.trim().length >= 6 && taxOk && !busy;
 
   async function handleSubmit() {
     setBusy(true);
     setError("");
+    // 先存發票資料（存在會員檔案上），再送加值申請
+    const { error: invErr } = await supabase.rpc("set_my_invoice", {
+      p: { tax_id: taxId, title: invTitle, address: invAddress },
+    });
+    if (invErr) {
+      setBusy(false);
+      setError(invErr.message.includes("BAD_TAX_ID") ? "統一編號應為 8 位數字" : "發票資料儲存失敗：" + invErr.message);
+      return;
+    }
     const { error: err } = await supabase.rpc("request_topup", {
       p_amount_ntd: amount,
       p_bank_last5: last5,
@@ -103,9 +124,9 @@ export default function Topup() {
           </button>
         </div>
 
-        <h1 className="text-2xl font-bold text-gray-900 mb-1">加值點數</h1>
+        <h1 className="text-2xl font-bold text-gray-900 mb-1">加值信用點數</h1>
         <p className="text-sm text-gray-500 mb-1">
-          {points != null ? `目前餘額 ${points} 點` : "解鎖聯絡方式需要點數"}
+          {points != null ? `目前餘額 ${points} 點` : "立即連繫關鍵人脈需要信用點數"}
         </p>
         <p className="text-base font-semibold text-purple-600 mb-6">
           用一杯咖啡的錢，創造無限的機會
@@ -117,13 +138,13 @@ export default function Topup() {
           <div className="space-y-4">
             {/* 方案卡 */}
             <div className="rounded-2xl ek-rich text-white p-5 overflow-hidden">
-              <div className="text-xs text-purple-100 mb-1">點數方案</div>
+              <div className="text-xs text-purple-100 mb-1">信用點數方案</div>
               <div className="flex items-end gap-2">
                 <div className="text-4xl font-bold text-gold-400">{PACK_POINTS}</div>
                 <div className="text-lg mb-1">點</div>
                 <div className="ml-auto text-2xl font-semibold">NT${PACK_PRICE}</div>
               </div>
-              <div className="text-sm text-purple-100 mt-2">可解鎖 {PACK_POINTS / 10} 位合作對象的聯絡方式・點數無使用期限</div>
+              <div className="text-sm text-purple-100 mt-2">可連繫 {PACK_POINTS / 10} 位關鍵人脈・點數無使用期限</div>
               <div className="text-xs text-gold-400 mt-1">平均一位關鍵人脈 NT${PACK_PRICE / (PACK_POINTS / 10)}</div>
 
               <div className="mt-4 flex items-center gap-3">
@@ -200,6 +221,40 @@ export default function Topup() {
                       className="w-full px-4 py-3 rounded-xl border border-gray-200 focus:border-purple-600 outline-none tracking-widest"
                     />
                   </div>
+                  <div className="pt-3 border-t border-gray-100">
+                    <div className="text-xs font-semibold text-gray-700 mb-0.5">發票資料</div>
+                    <p className="text-[11px] text-gray-400 mb-2">
+                      收到匯款後開立統一發票郵寄給你。公司報帳請填統編與抬頭，個人可留空
+                    </p>
+                    <div className="space-y-2">
+                      <input
+                        type="text"
+                        inputMode="numeric"
+                        maxLength={8}
+                        value={taxId}
+                        onChange={(e) => setTaxId(e.target.value.replace(/\D/g, ""))}
+                        placeholder="統一編號（選填，8 位數字）"
+                        className="w-full px-4 py-2.5 rounded-xl border border-gray-200 focus:border-purple-600 outline-none text-sm"
+                      />
+                      <input
+                        type="text"
+                        maxLength={100}
+                        value={invTitle}
+                        onChange={(e) => setInvTitle(e.target.value)}
+                        placeholder="發票抬頭（選填，公司名稱）"
+                        className="w-full px-4 py-2.5 rounded-xl border border-gray-200 focus:border-purple-600 outline-none text-sm"
+                      />
+                      <input
+                        type="text"
+                        maxLength={200}
+                        value={invAddress}
+                        onChange={(e) => setInvAddress(e.target.value)}
+                        placeholder="發票寄送地址（必填，含郵遞區號）"
+                        className="w-full px-4 py-2.5 rounded-xl border border-gray-200 focus:border-purple-600 outline-none text-sm"
+                      />
+                    </div>
+                    {taxId !== "" && !taxOk && <p className="text-[11px] text-red-500 mt-1">統一編號應為 8 位數字</p>}
+                  </div>
                   <label className="flex items-start gap-2 text-xs text-gray-600 cursor-pointer">
                     <input
                       type="checkbox"
@@ -208,7 +263,7 @@ export default function Topup() {
                       className="mt-0.5"
                     />
                     <span>
-                      我已閱讀並同意服務條款，包含點數退費規定：購買後 7 日內且未使用可申請退費，點數一經使用即不予退費。
+                      我已閱讀並同意服務條款，包含退費規定：未使用的信用點數餘額可隨時申請退還（手續費不逾 3%），點數一經使用即不予退費。
                     </span>
                   </label>
                   {error && <p className="text-sm text-red-600">{error}</p>}

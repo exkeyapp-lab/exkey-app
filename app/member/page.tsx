@@ -4,7 +4,7 @@ import { useState, useEffect } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
 import { createClient } from "@/lib/supabase";
-import { levelLabel, PUBLIC_PROFILE_COLUMNS, type PublicProfile } from "@/lib/types";
+import { levelLabel, PUBLIC_PROFILE_COLUMNS, ENTRY_COLUMNS, type PublicProfile, type NetworkEntry } from "@/lib/types";
 
 const SITE_URL = "https://exkey-app.vercel.app";
 
@@ -14,9 +14,9 @@ function buildInviteMessage(senderName: string, code: string, link: string): str
   return [
     `${senderName} 邀請你加入 ExKey 關鍵人脈`,
     "",
-    "ExKey 是一個讓業務與廠商互相介紹人脈的平台：依產業、地區、部門、職級幫你配對想認識的合作對象，配對後才解鎖聯絡方式。",
+    "ExKey 是一個讓業務與廠商互相介紹人脈的平台：依產業、地區、部門、層級自動媒合你想認識的關鍵人脈，媒合後才取得聯絡方式。",
     "",
-    `用我的推薦碼註冊，我們各得 5 點（可用來解鎖聯絡方式）`,
+    `用我的推薦碼註冊，我們各得 5 點信用點數（可用來連繫關鍵人脈）`,
     `推薦碼：${code}`,
     "",
     "註冊連結（推薦碼會自動帶入）：",
@@ -89,15 +89,18 @@ interface UnlockedRow {
   created_at: string;
 }
 
+interface FinderSeek {
+  industries: string[] | null;
+  regions: string[] | null;
+  departments: string[] | null;
+  level: number | null;
+  note: string | null;
+}
 interface FinderRow {
   name: string | null;
   company: string | null;
   role: string | null;
-  seek_industries: string[] | null;
-  seek_regions: string[] | null;
-  seek_departments: string[] | null;
-  seek_level: number | null;
-  seek_note: string | null;
+  seeks: FinderSeek[] | null;
   created_at: string;
 }
 
@@ -124,7 +127,7 @@ export default function Member() {
   const [isAdmin, setIsAdmin] = useState(false);
   const [referral, setReferral] = useState<ReferralInfo | null>(null);
   const [copied, setCopied] = useState<"code" | "link" | null>(null);
-  const [toggling, setToggling] = useState(false);
+  const [entries, setEntries] = useState<NetworkEntry[]>([]);
   const [inviteFallback, setInviteFallback] = useState<string | null>(null);
   const [myUnlocks, setMyUnlocks] = useState<UnlockedRow[]>([]);
   const [finders, setFinders] = useState<FinderRow[]>([]);
@@ -153,6 +156,10 @@ export default function Member() {
 
       await loadProfile(userData.user.id);
 
+      // 我的人脈案件（找人脈／介紹人脈，可多筆）
+      const { data: ent } = await supabase.rpc("my_entries");
+      if (Array.isArray(ent)) setEntries(ent as NetworkEntry[]);
+
       const { data: adm } = await supabase.rpc("am_i_admin");
       if (adm === true) setIsAdmin(true);
 
@@ -180,24 +187,6 @@ export default function Member() {
     router.replace("/login");
   }
 
-  // 停用／啟用自己的檔案：停用後不會出現在別人的推薦裡，隨時可以開回來
-  async function toggleActive() {
-    if (!profile) return;
-    const next = !profile.is_active;
-    const msg = next
-      ? "重新啟用後，你的檔案會再次出現在其他會員的推薦裡。確定？"
-      : "停用後，其他會員找不到你、也不能解鎖你的聯絡方式。你的資料和點數都會保留，隨時可以再啟用。確定停用？";
-    if (!window.confirm(msg)) return;
-    setToggling(true);
-    const { error } = await supabase.rpc("set_my_active", { p_active: next });
-    setToggling(false);
-    if (error) {
-      alert("操作失敗：" + error.message);
-      return;
-    }
-    setProfile({ ...profile, is_active: next });
-  }
-
   async function copyText(text: string, which: "code" | "link") {
     try {
       await navigator.clipboard.writeText(text);
@@ -219,9 +208,13 @@ export default function Member() {
     }
   }
 
-  function Tags({ items, level }: { items: string[]; level: number | null }) {
-    const empty = items.length === 0 && level == null;
-    if (empty) return <span className="text-xs text-gray-400">不限</span>;
+  // 一筆案件的條件標籤；全部不限時明講「不限」
+  function EntryTags({ e }: { e: NetworkEntry }) {
+    const items = [...(e.industries || []), ...(e.regions || []), ...(e.departments || [])];
+    const lv = e.level || 0;
+    if (items.length === 0 && lv === 0) {
+      return <span className="text-xs text-gray-400">產業、地區、部門、層級皆不限</span>;
+    }
     return (
       <div className="flex flex-wrap gap-1">
         {items.map((v) => (
@@ -229,11 +222,54 @@ export default function Member() {
             {v}
           </span>
         ))}
-        {level != null && level > 0 && (
+        {lv > 0 && (
           <span className="text-xs bg-gold-50 text-gold-900 px-2 py-1 rounded border border-gold-100">
-            {levelLabel(level)}
+            {levelLabel(lv)}
           </span>
         )}
+      </div>
+    );
+  }
+
+  function EntryList({ kind }: { kind: "seek" | "offer" }) {
+    const list = entries.filter((e) => e.kind === kind);
+    const isSeek = kind === "seek";
+    return (
+      <div className="flex gap-3">
+        <div className={`w-1 rounded-full shrink-0 ${isSeek ? "bg-gold-600" : "bg-purple-600"}`} />
+        <div className="flex-1 min-w-0">
+          <div className="flex items-center justify-between mb-1.5">
+            <div className={`text-[11px] font-semibold ${isSeek ? "text-gold-900" : "text-purple-600"}`}>
+              {isSeek ? "找人脈" : "介紹人脈"}
+              <span className="text-gray-400 font-normal ml-1">{list.length} 筆</span>
+            </div>
+            <button
+              onClick={() => router.push(`/entry?kind=${kind}`)}
+              className="text-[11px] text-purple-600 font-semibold underline"
+            >
+              ＋ 新增
+            </button>
+          </div>
+          {list.length === 0 ? (
+            <p className="text-xs text-gray-400">
+              {isSeek ? "還沒有找人脈的案件，新增一筆系統才能幫你媒合" : "還沒有介紹人脈的案件"}
+            </p>
+          ) : (
+            <div className="space-y-2">
+              {list.map((e) => (
+                <button
+                  key={e.id}
+                  onClick={() => router.push(`/entry?id=${e.id}`)}
+                  className="w-full text-left bg-purple-50/60 hover:bg-purple-50 rounded-xl p-2.5 transition"
+                >
+                  <EntryTags e={e} />
+                  {e.note && <p className="text-xs text-gray-600 mt-1.5 leading-relaxed">「{e.note}」</p>}
+                  <div className="text-[10px] text-gray-400 mt-1">點一下修改或刪除</div>
+                </button>
+              ))}
+            </div>
+          )}
+        </div>
       </div>
     );
   }
@@ -289,14 +325,15 @@ export default function Member() {
               <div className="flex items-center justify-between mb-1">
                 <div className="font-semibold text-gray-900">{profile.name}</div>
                 <div className="flex items-center gap-2">
-                  {profile.is_active ? (
-                    <span className="text-xs bg-green-50 text-green-700 border border-green-100 px-2 py-0.5 rounded-full">
-                      媒合中
-                    </span>
-                  ) : (
+                  {!profile.is_active && (
                     <span className="text-xs bg-gray-100 text-gray-500 px-2 py-0.5 rounded-full">已停用</span>
                   )}
-                  <span className="text-xs bg-purple-100 text-purple-900 px-2 py-1 rounded-full">免費會員</span>
+                  <button
+                    onClick={() => router.push("/onboarding?edit=1")}
+                    className="text-xs text-purple-600 underline"
+                  >
+                    編輯基本資料
+                  </button>
                 </div>
               </div>
               <div className="text-sm text-gray-500">
@@ -306,55 +343,18 @@ export default function Member() {
               {profile.bio && <p className="text-sm text-gray-600 mt-2">{profile.bio}</p>}
             </div>
 
-            {/* 我的人脈條件：註冊時填的內容，放在最上面，直接可改 */}
+            {/* 我的人脈案件：找人脈／介紹人脈，各可多筆 */}
             <div className="bg-white rounded-2xl border border-purple-100 p-4 shadow-sm">
-              <div className="flex items-center justify-between mb-3">
-                <div className="text-sm font-bold text-purple-900">我的人脈條件</div>
-                <button
-                  onClick={() => router.push("/onboarding?edit=1")}
-                  className="text-xs bg-purple-600 text-white font-semibold px-3 py-1.5 rounded-lg"
-                >
-                  編輯
-                </button>
+              <div className="flex items-center justify-between mb-1">
+                <div className="text-sm font-bold text-purple-900">我的人脈案件</div>
+                <span className="text-xs text-gray-400">{entries.length} 筆</span>
               </div>
-
-              <div className="flex gap-3 mb-4">
-                <div className="w-1 rounded-full bg-gold-600 shrink-0" />
-                <div className="flex-1 min-w-0">
-                  <div className="text-[11px] font-semibold text-gold-900 mb-1.5">我想找</div>
-                  <Tags items={profile.seek_industries || []} level={profile.seek_level} />
-                  <div className="mt-1.5">
-                    <Tags items={[...(profile.seek_regions || []), ...(profile.seek_departments || [])]} level={null} />
-                  </div>
-                  {profile.seek_note && (
-                    <p className="text-xs text-gray-600 mt-2 leading-relaxed">「{profile.seek_note}」</p>
-                  )}
-                </div>
-              </div>
-
-              <div className="flex gap-3">
-                <div className="w-1 rounded-full bg-purple-600 shrink-0" />
-                <div className="flex-1 min-w-0">
-                  <div className="text-[11px] font-semibold text-purple-600 mb-1.5">我能介紹</div>
-                  {profile.has_offer ? (
-                    <>
-                      <Tags items={profile.offer_industries || []} level={profile.offer_level} />
-                      <div className="mt-1.5">
-                        <Tags items={[...(profile.offer_regions || []), ...(profile.offer_departments || [])]} level={null} />
-                      </div>
-                      {profile.offer_note && (
-                        <p className="text-xs text-gray-600 mt-2 leading-relaxed">「{profile.offer_note}」</p>
-                      )}
-                    </>
-                  ) : (
-                    <button
-                      onClick={() => router.push("/onboarding?edit=1")}
-                      className="text-xs text-purple-600 underline"
-                    >
-                      尚未填寫，點此補上
-                    </button>
-                  )}
-                </div>
+              <p className="text-[11px] text-gray-400 mb-4">
+                系統依這些案件自動媒合。兩種案件都沒有的話，你不會出現在別人的名單裡
+              </p>
+              <div className="space-y-4">
+                <EntryList kind="seek" />
+                <EntryList kind="offer" />
               </div>
             </div>
 
@@ -362,18 +362,18 @@ export default function Member() {
               onClick={() => router.push("/discover")}
               className="w-full bg-gold-600 text-purple-900 font-semibold py-3 rounded-xl"
             >
-              查看為我推薦的人脈 →
+              查看自動媒合結果 →
             </button>
 
-            {/* 我找過的人 */}
+            {/* 我連繫過的關鍵人脈 */}
             <div className="bg-white rounded-2xl border border-gray-100 p-4 shadow-sm">
               <div className="flex items-center justify-between mb-1">
-                <div className="text-sm font-bold text-purple-900">我找過的人</div>
+                <div className="text-sm font-bold text-purple-900">我連繫過的關鍵人脈</div>
                 <span className="text-xs text-gray-400">{myUnlocks.length} 位</span>
               </div>
-              <p className="text-[11px] text-gray-400 mb-3">你解鎖過的聯絡方式都留在這裡，永久免費查看</p>
+              <p className="text-[11px] text-gray-400 mb-3">你按過「立即連繫」取得的聯絡方式都留在這裡，永久免費查看</p>
               {myUnlocks.length === 0 ? (
-                <p className="text-xs text-gray-400 py-2">還沒有解鎖過任何人</p>
+                <p className="text-xs text-gray-400 py-2">還沒有連繫過任何人</p>
               ) : (
                 <div className="divide-y divide-gray-50">
                   {(showAllUnlocks ? myUnlocks : myUnlocks.slice(0, LIST_PREVIEW)).map((u) => (
@@ -424,24 +424,27 @@ export default function Member() {
               )}
             </div>
 
-            {/* 找過我的人 */}
+            {/* 想合作：誰連繫了我 */}
             <div className="bg-white rounded-2xl border border-gray-100 p-4 shadow-sm">
               <div className="flex items-center justify-between mb-1">
-                <div className="text-sm font-bold text-purple-900">找過我的人</div>
+                <div className="text-sm font-bold text-purple-900">想合作</div>
                 <span className="text-xs text-gray-400">{finders.length} 位</span>
               </div>
-              <p className="text-[11px] text-gray-400 mb-3">這些人解鎖了你的 LINE，可能會主動加你</p>
+              <p className="text-[11px] text-gray-400 mb-3">這些人對你按了「立即連繫」、取得你的 LINE，可能會主動加你</p>
               {finders.length === 0 ? (
-                <p className="text-xs text-gray-400 py-2">還沒有人解鎖你的聯絡方式</p>
+                <p className="text-xs text-gray-400 py-2">還沒有人連繫你</p>
               ) : (
                 <div className="divide-y divide-gray-50">
                   {(showAllFinders ? finders : finders.slice(0, LIST_PREVIEW)).map((f, i) => {
-                    const seekTags = [
-                      ...(f.seek_industries || []),
-                      ...(f.seek_regions || []),
-                      ...(f.seek_departments || []),
-                      ...(f.seek_level ? [levelLabel(f.seek_level)] : []),
-                    ];
+                    const firstSeek = (f.seeks || [])[0];
+                    const seekTags = firstSeek
+                      ? [
+                          ...(firstSeek.industries || []),
+                          ...(firstSeek.regions || []),
+                          ...(firstSeek.departments || []),
+                          ...(firstSeek.level ? [levelLabel(firstSeek.level)] : []),
+                        ]
+                      : [];
                     return (
                       <div key={`${f.created_at}-${i}`} className="py-3">
                         <div className="flex items-center justify-between gap-2">
@@ -455,7 +458,7 @@ export default function Member() {
                         </div>
                         {seekTags.length > 0 && (
                           <div className="mt-1.5 flex flex-wrap gap-1 items-center">
-                            <span className="text-[10px] text-gold-900 font-semibold mr-0.5">他想找</span>
+                            <span className="text-[10px] text-gold-900 font-semibold mr-0.5">他的找人脈</span>
                             {seekTags.slice(0, 5).map((t) => (
                               <span key={t} className="text-[10px] bg-gold-50 text-gold-900 border border-gold-100 px-1.5 py-0.5 rounded">
                                 {t}
@@ -463,7 +466,7 @@ export default function Member() {
                             ))}
                           </div>
                         )}
-                        {f.seek_note && <p className="text-[11px] text-gray-500 mt-1">「{f.seek_note}」</p>}
+                        {firstSeek && firstSeek.note && <p className="text-[11px] text-gray-500 mt-1">「{firstSeek.note}」</p>}
                       </div>
                     );
                   })}
@@ -481,7 +484,7 @@ export default function Member() {
 
             {!profile.is_active && (
               <div className="bg-gold-50 border border-gold-100 text-gold-900 text-xs rounded-xl p-3 leading-relaxed">
-                你的檔案目前已停用，其他會員看不到你。要重新被找到，按最下方「重新啟用」。
+                你的檔案已由管理員停用，其他會員看不到你。有疑問請寫信到 exkey.app@gmail.com。
               </div>
             )}
 
@@ -489,11 +492,11 @@ export default function Member() {
             <div className="grid grid-cols-2 gap-4">
               <div className="bg-white rounded-2xl border border-gray-100 p-4 shadow-sm text-center">
                 <div className="text-2xl font-bold text-gold-900">{points ?? "—"}</div>
-                <div className="text-xs text-gray-400 mt-1">點數餘額</div>
+                <div className="text-xs text-gray-400 mt-1">信用點數餘額</div>
               </div>
               <div className="bg-white rounded-2xl border border-gray-100 p-4 shadow-sm text-center">
                 <div className="text-2xl font-bold text-purple-600">{unlockedTimes ?? "—"}</div>
-                <div className="text-xs text-gray-400 mt-1">檔案被解鎖次數</div>
+                <div className="text-xs text-gray-400 mt-1">被連繫次數</div>
               </div>
             </div>
 
@@ -501,7 +504,7 @@ export default function Member() {
               onClick={() => router.push("/topup")}
               className="w-full border border-gold-600 text-gold-900 font-medium py-2.5 rounded-xl text-sm bg-white"
             >
-              加值點數（100 點 / NT$500）→
+              加值信用點數（100 點 / NT$500）→
             </button>
 
             {/* 推薦碼 */}
@@ -518,7 +521,7 @@ export default function Member() {
                   </button>
                 </div>
                 <div className="text-xs text-purple-100 mt-3 leading-relaxed">
-                  朋友用你的推薦碼完成註冊（含信箱驗證與建檔），你們各得 5 點。
+                  朋友用你的推薦碼完成註冊並建檔，你們各得 5 點信用點數。
                   已成功推薦 <span className="font-bold text-gold-400">{referral.referred_count}</span> / {referral.cap} 人
                 </div>
                 <button
@@ -539,22 +542,6 @@ export default function Member() {
                 {inviteFallback && <InviteTextPanel text={inviteFallback} onClose={() => setInviteFallback(null)} />}
               </div>
             )}
-
-            {/* 帳號狀態：暫停／重新啟用 */}
-            <div className="bg-white rounded-2xl border border-gray-100 p-4 shadow-sm flex items-center justify-between gap-3">
-              <div className="text-xs text-gray-500 leading-relaxed">
-                {profile.is_active
-                  ? "你的檔案目前在媒合中，其他會員找得到你"
-                  : "你的檔案已停用，其他會員看不到你"}
-              </div>
-              <button
-                disabled={toggling}
-                onClick={toggleActive}
-                className="shrink-0 border border-gray-200 text-gray-500 text-xs py-2 px-3 rounded-lg disabled:opacity-50"
-              >
-                {toggling ? "處理中..." : profile.is_active ? "暫停媒合" : "重新啟用"}
-              </button>
-            </div>
           </div>
         )}
       </div>

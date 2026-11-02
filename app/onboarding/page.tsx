@@ -13,6 +13,7 @@ import {
   type Role,
   emptyOnboardingData,
   mergedDepartments,
+  sideToPayload,
 } from "@/lib/types";
 
 const SITE_URL = "https://exkey-app.vercel.app";
@@ -51,18 +52,20 @@ const OFFER_STEPS: StepKey[] = [
 ];
 const FINAL_STEPS: StepKey[] = ["line_id"];
 
+const EDIT_STEPS: StepKey[] = ["role", "basic", "line_id"];
+
 const STEP_TITLES: Record<StepKey, string> = {
   role: "選擇身份",
   basic: "基本資料",
-  seek_industry: "想找的產業",
-  seek_region: "想找的地區",
-  seek_department: "想找的部門",
-  seek_level: "想找的職級",
-  offer_intro: "你能介紹的人脈",
-  offer_industry: "提供的產業",
-  offer_region: "提供的地區",
-  offer_department: "提供的部門",
-  offer_level: "提供的職級",
+  seek_industry: "找人脈：產業",
+  seek_region: "找人脈：地區",
+  seek_department: "找人脈：部門",
+  seek_level: "找人脈：層級",
+  offer_intro: "介紹人脈",
+  offer_industry: "介紹人脈：產業",
+  offer_region: "介紹人脈：地區",
+  offer_department: "介紹人脈：部門",
+  offer_level: "介紹人脈：層級",
   line_id: "聯絡方式與帳號",
 };
 
@@ -93,14 +96,6 @@ function clearDraft() {
     localStorage.removeItem(DRAFT_KEY);
     localStorage.removeItem(REF_KEY);
   } catch {}
-}
-
-// 資料庫存的部門陣列 → 表單用的「已知清單 + 自填」
-function splitDepartments(list: string[] | null | undefined): { known: string[]; custom: string } {
-  const known: string[] = [];
-  const custom: string[] = [];
-  (list || []).forEach((v) => (DEPARTMENTS.includes(v) ? known.push(v) : custom.push(v)));
-  return { known, custom: custom.join("、") };
 }
 
 // 共用的「多選 + 不限」欄位（產業／地區／部門 皆用這個畫面元件）
@@ -158,7 +153,7 @@ function DimensionPicker({
   );
 }
 
-// 共用的「職級」畫面元件
+// 共用的「層級」畫面元件
 function LevelPicker({
   title,
   subtitle,
@@ -321,38 +316,23 @@ export default function Onboarding() {
       return;
     }
     const p = full as Record<string, unknown>;
-    const seekDep = splitDepartments(p.seek_departments as string[] | null);
-    const offerDep = splitDepartments(p.offer_departments as string[] | null);
-    setData({
+    setData((prev) => ({
+      ...prev,
       role: (p.role as Role) || "",
       name: (p.name as string) || "",
       company: (p.company as string) || "",
       bio: (p.bio as string) || "",
-      seek: {
-        industries: (p.seek_industries as string[]) || [],
-        regions: (p.seek_regions as string[]) || [],
-        departments: seekDep.known,
-        customDepartment: seekDep.custom,
-        level: (p.seek_level as number) || 0,
-        note: (p.seek_note as string) || "",
-      },
-      hasOffer: Boolean(p.has_offer),
-      offer: {
-        industries: (p.offer_industries as string[]) || [],
-        regions: (p.offer_regions as string[]) || [],
-        departments: offerDep.known,
-        customDepartment: offerDep.custom,
-        level: (p.offer_level as number) || 0,
-        note: (p.offer_note as string) || "",
-      },
       line_id: (p.line_id as string) || "",
-    });
+    }));
     setAgreedTerms(true);
     setEditMode(true);
   }
 
-  // 依「是否要填提供側」動態組出完整步驟序列
-  const steps: StepKey[] = data.hasOffer
+  // 步驟序列：編輯模式只改基本資料（人脈案件在會員專區另外管理）；
+  // 註冊時依「是否要填介紹人脈」決定要不要走介紹側的四步
+  const steps: StepKey[] = editMode
+    ? EDIT_STEPS
+    : data.hasOffer
     ? [...BASE_STEPS, ...OFFER_STEPS, ...FINAL_STEPS]
     : [...BASE_STEPS, ...FINAL_STEPS];
 
@@ -381,7 +361,8 @@ export default function Onboarding() {
     });
   }
 
-  // 把表單資料整理成要存進資料庫的欄位
+  // 把表單資料整理成要存進 profiles 的欄位
+  // （舊的單筆條件欄位照存一份，正式的媒合條件是建檔後另外寫進人脈案件表）
   function buildPayload(d: OnboardingData) {
     const seekDepartments = mergedDepartments(d.seek);
     const offerDepartments = d.hasOffer ? mergedDepartments(d.offer) : [];
@@ -436,6 +417,12 @@ export default function Onboarding() {
       return;
     }
 
+    // 媒合條件寫進人脈案件表：找人脈一筆，有填介紹人脈再一筆
+    try {
+      await supabase.rpc("save_entry", { p: sideToPayload("seek", d.seek) });
+      if (d.hasOffer) await supabase.rpc("save_entry", { p: sideToPayload("offer", d.offer) });
+    } catch {}
+
     // Google 登入的人，把 Google 大頭照帶進來（失敗不影響建檔）
     try {
       const { data: userData } = await supabase.auth.getUser();
@@ -444,7 +431,7 @@ export default function Onboarding() {
       if (avatar) await supabase.rpc("set_my_avatar", { p_url: avatar });
     } catch {}
 
-    // 推薦碼：由伺服器端判斷是否發點（信箱未驗證、自推、超過上限都不會發）
+    // 推薦碼：由伺服器端判斷是否發點（自推、超過上限都不會發）
     if (ref) {
       try {
         await supabase.rpc("apply_referral", { p_code: ref });
@@ -461,7 +448,9 @@ export default function Onboarding() {
 
     // 編輯模式：直接更新
     if (editMode) {
-      const { error: err } = await supabase.rpc("update_my_profile", { p: buildPayload(data) });
+      const { error: err } = await supabase.rpc("update_my_basics", {
+        p: { name: data.name, company: data.company, bio: data.bio, line_id: data.line_id, role: data.role },
+      });
       if (err) {
         setError("儲存失敗：" + err.message);
         setSaving(false);
@@ -520,7 +509,7 @@ export default function Onboarding() {
           if (!r) return;
           uid = r;
         } else if (!signUpData.session) {
-          // 需要信箱驗證：先把資料存起來，等對方點完信裡的連結回來自動建檔
+          // 資料庫後台若仍開著信箱驗證：先把資料存起來，等對方點完信裡的連結回來自動建檔
           saveDraft(data, ref);
           setPhase("pending_confirm");
           setSaving(false);
@@ -711,7 +700,7 @@ export default function Onboarding() {
           <div className="ek-rich text-white rounded-2xl p-4 mb-5 overflow-hidden">
             <div className="text-xs text-purple-100 mb-1">你是透過朋友的邀請連結來的</div>
             <div className="text-sm leading-relaxed">
-              ExKey 幫業務與廠商配對想認識的合作對象，配對後才解鎖聯絡方式。完成註冊，你和邀請你的朋友各得{" "}
+              ExKey 幫業務與廠商自動媒合想認識的關鍵人脈，媒合後才取得聯絡方式。完成註冊，你和邀請你的朋友各得{" "}
               <span className="font-bold text-gold-400">5 點</span>。推薦碼已自動帶入：
               <span className="font-bold tracking-widest text-gold-400 ml-1">{referralCode}</span>
             </div>
@@ -724,7 +713,7 @@ export default function Onboarding() {
         <div className="mb-8">
           <div className="flex justify-between text-xs text-gray-500 mb-2">
             <span>
-              {editMode && <span className="text-purple-600 font-semibold mr-1">編輯檔案・</span>}
+              {editMode && <span className="text-purple-600 font-semibold mr-1">編輯基本資料・</span>}
               {STEP_TITLES[step]}
             </span>
             <span>
@@ -808,7 +797,7 @@ export default function Onboarding() {
         {step === "seek_industry" && (
           <DimensionPicker
             title="你想找的產業？"
-            subtitle="想認識哪些產業的人脈？不確定就選「不限」"
+            subtitle="想認識哪些產業的關鍵人脈？選「不限」會配到所有產業"
             options={INDUSTRIES}
             selected={data.seek.industries}
             onToggle={(v) => toggleSeek("industries", v)}
@@ -819,7 +808,7 @@ export default function Onboarding() {
         {step === "seek_region" && (
           <DimensionPicker
             title="你想找的地區？"
-            subtitle="想認識哪些地區的人脈？不確定就選「不限」"
+            subtitle="想認識哪些地區的關鍵人脈？選「不限」會配到所有地區"
             options={REGIONS}
             selected={data.seek.regions}
             onToggle={(v) => toggleSeek("regions", v)}
@@ -830,7 +819,7 @@ export default function Onboarding() {
         {step === "seek_department" && (
           <DimensionPicker
             title="你想找的部門？"
-            subtitle="想認識對方公司裡的哪個部門？不確定就選「不限」"
+            subtitle="想認識對方公司裡的哪個部門？選「不限」會配到所有部門"
             options={DEPARTMENTS}
             selected={data.seek.departments}
             onToggle={(v) => toggleSeek("departments", v)}
@@ -851,13 +840,13 @@ export default function Onboarding() {
 
         {step === "seek_level" && (
           <LevelPicker
-            title="你想找的職級？"
-            subtitle="想認識哪個職級的人脈？不確定就選「不限」"
+            title="你想找的層級？"
+            subtitle="想認識哪個層級的關鍵人脈？選了之後，該層級以上都算符合"
             level={data.seek.level}
             onSelect={(v) => setData((p) => ({ ...p, seek: { ...p.seek, level: v } }))}
             extra={
               <NoteBox
-                label="想找的人脈，還想補充什麼？"
+                label="找人脈，還想補充什麼？"
                 placeholder="例：想找竹科半導體廠的設備採購決策者，或能介紹科技廠總務的人"
                 value={data.seek.note}
                 onChange={(v) => setData((p) => ({ ...p, seek: { ...p.seek, note: v } }))}
@@ -868,9 +857,9 @@ export default function Onboarding() {
 
         {step === "offer_intro" && (
           <div>
-            <h1 className="text-2xl font-bold text-gray-900 mb-1">你能介紹的人脈？</h1>
+            <h1 className="text-2xl font-bold text-gray-900 mb-1">介紹人脈：你能介紹誰？</h1>
             <p className="text-sm text-gray-500 mb-6">
-              這段完全自由，不確定或暫時沒有都可以跳過，之後隨時可以再補
+              這段完全自由，不確定或暫時沒有都可以跳過。之後在會員專區可以隨時新增好幾筆
             </p>
             <div className="space-y-3">
               <button
@@ -883,7 +872,7 @@ export default function Onboarding() {
                 }`}
               >
                 <div className="font-semibold text-gray-900">好，我要填</div>
-                <div className="text-sm text-gray-500">例：我認識台積電採購課長</div>
+                <div className="text-sm text-gray-500">例：我認識半導體廠的採購課長</div>
               </button>
               <button
                 onClick={() => {
@@ -895,7 +884,7 @@ export default function Onboarding() {
                 }`}
               >
                 <div className="font-semibold text-gray-900">跳過，之後再填</div>
-                <div className="text-sm text-gray-500">只想找人脈，暫時沒有可以介紹的</div>
+                <div className="text-sm text-gray-500">先找人脈就好，暫時沒有可以介紹的</div>
               </button>
             </div>
           </div>
@@ -904,7 +893,7 @@ export default function Onboarding() {
         {step === "offer_industry" && (
           <DimensionPicker
             title="你能介紹的產業？"
-            subtitle="你認識的人脈屬於哪些產業？不確定就選「不限」"
+            subtitle="你認識的關鍵人脈屬於哪些產業？不確定就選「不限」"
             options={INDUSTRIES}
             selected={data.offer.industries}
             onToggle={(v) => toggleOffer("industries", v)}
@@ -915,7 +904,7 @@ export default function Onboarding() {
         {step === "offer_region" && (
           <DimensionPicker
             title="你能介紹的地區？"
-            subtitle="你認識的人脈在哪些地區？不確定就選「不限」"
+            subtitle="你認識的關鍵人脈在哪些地區？不確定就選「不限」"
             options={REGIONS}
             selected={data.offer.regions}
             onToggle={(v) => toggleOffer("regions", v)}
@@ -926,7 +915,7 @@ export default function Onboarding() {
         {step === "offer_department" && (
           <DimensionPicker
             title="你能介紹的部門？"
-            subtitle="你認識的人脈在對方公司的哪個部門？不確定就選「不限」"
+            subtitle="你認識的關鍵人脈在對方公司的哪個部門？不確定就選「不限」"
             options={DEPARTMENTS}
             selected={data.offer.departments}
             onToggle={(v) => toggleOffer("departments", v)}
@@ -947,14 +936,14 @@ export default function Onboarding() {
 
         {step === "offer_level" && (
           <LevelPicker
-            title="你能介紹的職級？"
-            subtitle="你認識的人脈職級大概到哪？不確定就選「不限」"
+            title="你能介紹的層級？"
+            subtitle="你認識的關鍵人脈層級大概到哪？不確定就選「不限」"
             level={data.offer.level}
             onSelect={(v) => setData((p) => ({ ...p, offer: { ...p.offer, level: v } }))}
             extra={
               <NoteBox
-                label="你能介紹的人脈，一句話說明"
-                placeholder="例：我認識台積電採購課長、台塑廠務經理，另有幾位化工廠總經理"
+                label="介紹人脈，一句話說明"
+                placeholder="例：認識幾位半導體廠採購課長與化工廠廠務經理（不用寫對方的名字）"
                 value={data.offer.note}
                 onChange={(v) => setData((p) => ({ ...p, offer: { ...p.offer, note: v } }))}
               />
@@ -968,7 +957,7 @@ export default function Onboarding() {
               {editMode ? "最後確認" : "✨ 最後一步"}
             </div>
             <h1 className="text-2xl font-bold text-gray-900 mb-1">留下聯絡方式</h1>
-            <p className="text-sm text-gray-500 mb-6">配對成功後，對方可以透過 LINE 聯繫你</p>
+            <p className="text-sm text-gray-500 mb-6">對方按下「立即連繫」後，可以透過 LINE 聯繫你</p>
             <div>
               <label className="block text-sm font-medium text-gray-700 mb-1">你的 LINE ID</label>
               <input
@@ -1001,7 +990,7 @@ export default function Onboarding() {
                   />
                 </div>
                 <p className="text-xs text-gray-400 mt-2">
-                  送出後會寄一封驗證信到這個 Email，點連結即完成。已有帳號？直接輸入原本的 Email 和密碼即可
+                  已有帳號？直接輸入原本的 Email 和密碼即可
                 </p>
               </div>
             )}
@@ -1028,12 +1017,16 @@ export default function Onboarding() {
                 <span className="text-xs bg-purple-100 text-purple-900 px-2 py-1 rounded">
                   {data.role === "sales" ? "業務" : data.role === "vendor" ? "廠商" : "兩者皆是"}
                 </span>
-                <span className="text-xs bg-purple-100 text-purple-900 px-2 py-1 rounded">
-                  想找：{data.seek.industries.length === 0 ? "不限產業" : `${data.seek.industries.length} 個產業`}
-                </span>
-                <span className="text-xs bg-purple-100 text-purple-900 px-2 py-1 rounded">
-                  {data.hasOffer ? "已填寫可提供的人脈" : "尚未填寫可提供的人脈"}
-                </span>
+                {!editMode && (
+                  <>
+                    <span className="text-xs bg-purple-100 text-purple-900 px-2 py-1 rounded">
+                      找人脈：{data.seek.industries.length === 0 ? "不限產業" : `${data.seek.industries.length} 個產業`}
+                    </span>
+                    <span className="text-xs bg-purple-100 text-purple-900 px-2 py-1 rounded">
+                      {data.hasOffer ? "已填一筆介紹人脈" : "尚未填介紹人脈"}
+                    </span>
+                  </>
+                )}
               </div>
             </div>
 
@@ -1046,7 +1039,7 @@ export default function Onboarding() {
                   className="mt-0.5"
                 />
                 <span>
-                  我已閱讀並同意 <a href="/terms" target="_blank" rel="noopener noreferrer" className="text-purple-600 underline">服務條款與隱私權政策</a>，瞭解本平台為資訊中介，會員間的聯繫與合作由雙方自行負責，且點數一經使用不予退費。
+                  我已閱讀並同意 <a href="/terms" target="_blank" rel="noopener noreferrer" className="text-purple-600 underline">服務條款與隱私權政策</a>，瞭解本平台為資訊中介，會員間的聯繫與合作由雙方自行負責，且信用點數一經使用不予退費。
                 </span>
               </label>
             )}
@@ -1076,8 +1069,8 @@ export default function Onboarding() {
                   : editMode
                   ? "儲存變更"
                   : userId
-                  ? "建立檔案，馬上幫你找符合的人脈 →"
-                  : "註冊並寄驗證信 →"}
+                  ? "建立檔案，馬上開始自動媒合 →"
+                  : "建立帳號並完成建檔 →"}
               </button>
             ) : (
               <button

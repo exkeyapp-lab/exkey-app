@@ -1,13 +1,13 @@
 // ==================== 基本身份 ====================
 
-// 用戶基本身份（僅供顯示，配對邏輯不再依賴這個欄位）
+// 用戶基本身份（僅供顯示，配對邏輯不依賴這個欄位）
 export type Role = "sales" | "vendor" | "both";
 
 // 舊欄位型別（保留在資料庫但新演算法不使用）
 export type ContactLevel = "junior" | "middle" | "senior";
 export type Familiarity = "light" | "medium" | "deep";
 
-// ==================== 職級（四層） ====================
+// ==================== 層級（四層） ====================
 // 4=高階主管, 3=經理級, 2=課長級, 1=專員級, 0=不限
 export const JOB_LEVELS = [
   { value: 4, label: "高階主管", desc: "董事長、總經理、總監等高階主管" },
@@ -38,13 +38,13 @@ export const REGIONS = [
   "台中", "台南", "高雄", "全台"
 ];
 
-// ==================== 烏龜配對模型：一組人脈資料（提供側／想找側共用結構） ====================
+// ==================== 一組人脈條件（找人脈／介紹人脈共用結構） ====================
 export interface NetworkSide {
   industries: string[];       // 空陣列 = 不限
   regions: string[];          // 空陣列 = 不限
   departments: string[];      // 空陣列 = 不限（不含「其他」自填文字，見 customDepartment）
   customDepartment: string;   // 「其他」自行填寫的部門（選填）
-  level: number;               // 0 = 不限；1~4 為門檻（該職級以上皆符合）
+  level: number;               // 0 = 不限；1~4 為層級
   note: string;                // 一句話說明（選填）
 }
 
@@ -58,6 +58,63 @@ export function mergedDepartments(side: NetworkSide): string[] {
   return custom ? [...side.departments, custom] : side.departments;
 }
 
+// 資料庫存的部門陣列 → 表單用的「已知清單 + 自填」
+export function splitDepartments(list: string[] | null | undefined): { known: string[]; custom: string } {
+  const known: string[] = [];
+  const custom: string[] = [];
+  (list || []).forEach((v) => (DEPARTMENTS.includes(v) ? known.push(v) : custom.push(v)));
+  return { known, custom: custom.join("、") };
+}
+
+// ==================== 人脈案件：一個人可以登錄多筆 ====================
+// kind = "seek" 找人脈（我想找什麼樣的關鍵人脈）
+// kind = "offer" 介紹人脈（我能介紹什麼樣的關鍵人脈）
+export type EntryKind = "seek" | "offer";
+
+export interface NetworkEntry {
+  id: string;
+  profile_id: string;
+  kind: EntryKind;
+  industries: string[];
+  regions: string[];
+  departments: string[];
+  level: number;            // 0 = 不限
+  note: string | null;
+  created_at: string;
+}
+
+export const ENTRY_COLUMNS = "id, profile_id, kind, industries, regions, departments, level, note, created_at";
+
+export function kindLabel(k: EntryKind): string {
+  return k === "seek" ? "找人脈" : "介紹人脈";
+}
+
+// 資料庫的一筆案件 → 表單結構
+export function entryToSide(e: NetworkEntry): NetworkSide {
+  const dep = splitDepartments(e.departments);
+  return {
+    industries: e.industries || [],
+    regions: e.regions || [],
+    departments: dep.known,
+    customDepartment: dep.custom,
+    level: e.level || 0,
+    note: e.note || "",
+  };
+}
+
+// 表單結構 → 要送進 save_entry 的內容
+export function sideToPayload(kind: EntryKind, side: NetworkSide, id?: string | null) {
+  return {
+    id: id || null,
+    kind,
+    industries: side.industries,
+    regions: side.regions,
+    departments: mergedDepartments(side),
+    level: side.level || 0,
+    note: side.note.trim() || null,
+  };
+}
+
 // ==================== 用戶 Profile 的完整結構 ====================
 export interface Profile {
   id: string;
@@ -69,22 +126,20 @@ export interface Profile {
   line_id: string | null;
   role: Role;
 
-  // 提供側（公龜：我能介紹的人脈）
+  // 舊的單筆條件欄位（已改為人脈案件表，這些欄位保留但不再使用）
   offer_industries: string[];
   offer_regions: string[];
   offer_departments: string[];
   offer_level: number | null;
   offer_note: string | null;
   has_offer: boolean;
-
-  // 想找側（母龜：我想找的人脈）
   seek_industries: string[];
   seek_regions: string[];
   seek_departments: string[];
   seek_level: number | null;
   seek_note: string | null;
 
-  // 舊欄位（保留在資料庫，但新演算法不使用）
+  // 更舊的欄位（保留在資料庫，不使用）
   industries: string[];
   regions: string[];
   target_clients: string[];
@@ -100,7 +155,7 @@ export interface Profile {
   is_verified: boolean;
 }
 
-// ==================== Onboarding 過程中暫存的資料 ====================
+// ==================== 註冊過程中暫存的資料 ====================
 export interface OnboardingData {
   role: Role | "";
   name: string;
@@ -124,11 +179,19 @@ export function emptyOnboardingData(): OnboardingData {
     line_id: "",
   };
 }
-// ==================== 公開查詢用（不含 line_id） ====================
-// discover 頁改用逐欄查詢，line_id 不再隨整包資料送到瀏覽器
-export const PUBLIC_PROFILE_COLUMNS =
-  "id, user_id, name, company, bio, role, has_offer, is_verified, is_active, " +
-  "offer_industries, offer_regions, offer_departments, offer_level, offer_note, " +
-  "seek_industries, seek_regions, seek_departments, seek_level, seek_note";
 
-export type PublicProfile = Omit<Profile, "line_id">;
+// ==================== 公開查詢用（不含 line_id） ====================
+export const PUBLIC_PROFILE_COLUMNS =
+  "id, user_id, name, company, bio, role, is_verified, is_active, created_at";
+
+export interface PublicProfile {
+  id: string;
+  user_id: string | null;
+  name: string;
+  company: string | null;
+  bio: string | null;
+  role: Role;
+  is_verified: boolean;
+  is_active: boolean;
+  created_at: string;
+}

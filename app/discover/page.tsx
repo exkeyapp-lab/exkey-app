@@ -4,6 +4,7 @@ import { useState, useEffect } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
 import { createClient } from "@/lib/supabase";
+import NotificationBell from "../NotificationBell";
 import { levelLabel, PUBLIC_PROFILE_COLUMNS, ENTRY_COLUMNS, type PublicProfile, type NetworkEntry } from "@/lib/types";
 
 // ==================== 媒合計分 ====================
@@ -484,6 +485,7 @@ export default function Discover() {
             <span className="text-base font-bold text-white tracking-wide">ExKey</span>
           </Link>
           <div className="flex items-center gap-2">
+            <NotificationBell tone="dark" />
             {points != null && (
               <Link
                 href="/topup"

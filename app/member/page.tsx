@@ -4,6 +4,7 @@ import { useState, useEffect } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
 import { createClient } from "@/lib/supabase";
+import NotificationBell from "../NotificationBell";
 import { levelLabel, PUBLIC_PROFILE_COLUMNS, ENTRY_COLUMNS, type PublicProfile, type NetworkEntry } from "@/lib/types";
 
 const SITE_URL = "https://exkey-app.vercel.app";
@@ -287,6 +288,7 @@ export default function Member() {
             <span className="text-lg font-bold text-purple-900">ExKey</span>
           </Link>
           <div className="flex items-center gap-3">
+            <NotificationBell tone="light" />
             {isAdmin && (
               <button
                 onClick={() => router.push("/admin")}

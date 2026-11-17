@@ -664,8 +664,20 @@ export default function Discover() {
                       </div>
                     </div>
                     <div className="shrink-0 text-center">
-                      <MatchRing percent={p.percent} />
-                      <div className="text-[10px] text-gray-400 mt-1">符合度</div>
+                      {p.theirOffer ? (
+                        <>
+                          <MatchRing percent={p.percent} />
+                          <div className="text-[10px] text-gray-400 mt-1">符合度</div>
+                        </>
+                      ) : (
+                        // 對方還沒填介紹人脈：沒有東西可以和我的找人脈比對，不顯示 0%
+                        <>
+                          <div className="w-14 h-14 rounded-full border-[5px] border-gray-100 flex items-center justify-center text-[11px] font-semibold text-gray-400">
+                            未填
+                          </div>
+                          <div className="text-[10px] text-gray-400 mt-1">介紹人脈</div>
+                        </>
+                      )}
                     </div>
                   </div>
 
@@ -685,14 +697,14 @@ export default function Discover() {
                       title="他的介紹人脈"
                       tone="offer"
                       chips={offerChips}
-                      emptyText="尚未填寫"
+                      emptyText={p.theirOffer ? "不限" : "尚未填寫，暫時無法計算符合度"}
                       note={p.theirOffer ? p.theirOffer.note : null}
                     />
                     <ConditionBlock
                       title="他的找人脈"
                       tone="seek"
                       chips={seekChips}
-                      emptyText="尚未填寫"
+                      emptyText={p.theirSeek ? "不限" : "尚未填寫"}
                       note={p.theirSeek ? p.theirSeek.note : null}
                     />
                   </div>

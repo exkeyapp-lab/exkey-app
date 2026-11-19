@@ -100,6 +100,56 @@ interface MemberDetail {
   entries: EntryAxes[];
   seekCount: number;
   offerCount: number;
+  // 基本資料（下拉清單選到這位會員時顯示；舊函式沒給的欄位會是空的）
+  bio?: string | null;
+  role?: string | null;
+  line_id?: string | null;
+  points?: number | null;
+  created_at?: string | null;
+}
+// 後台會員基本資料：資料庫回來的一筆
+interface AdminProfile {
+  profile_id: string;
+  name: string | null;
+  company: string | null;
+  bio: string | null;
+  role: string | null;
+  line_id: string | null;
+  email: string | null;
+  is_active: boolean;
+  points: number | null;
+  created_at: string;
+}
+
+function roleText(r: string | null | undefined): string {
+  return r === "sales" ? "業務" : r === "vendor" ? "廠商" : r === "both" ? "業務兼廠商" : "";
+}
+
+// 把「所有會員的基本資料」和「有案件的會員明細」併成一份清單，沒填案件的會員也列出來
+function mergeMembers(profiles: AdminProfile[], withEntries: MemberDetail[]): MemberDetail[] {
+  const byId = new Map(withEntries.map((m) => [m.profile_id, m]));
+  const out: MemberDetail[] = profiles.map((p) => {
+    const d = byId.get(p.profile_id);
+    byId.delete(p.profile_id);
+    return {
+      profile_id: p.profile_id,
+      name: p.name || "（未命名）",
+      company: p.company || "",
+      email: p.email || "",
+      is_active: p.is_active,
+      entries: d ? d.entries : [],
+      seekCount: d ? d.seekCount : 0,
+      offerCount: d ? d.offerCount : 0,
+      bio: p.bio,
+      role: p.role,
+      line_id: p.line_id,
+      points: p.points,
+      created_at: p.created_at,
+    };
+  });
+  // 基本資料函式沒涵蓋到的（理論上不會有）照舊列在最後
+  byId.forEach((m) => out.push(m));
+  return out;
 }
 
 const ALL_LEVELS = JOB_LEVELS.map((l) => l.label);
@@ -209,7 +259,7 @@ export default function Admin() {
   const [detailShown, setDetailShown] = useState(DETAIL_PAGE);
 
   async function loadAll() {
-    const [ov, mem, ul, tp, rf, st, iv, ne] = await Promise.all([
+    const [ov, mem, ul, tp, rf, st, iv, ne, mp] = await Promise.all([
       supabase.rpc("admin_overview"),
       supabase.rpc("admin_members"),
       supabase.rpc("admin_unlock_logs"),
@@ -218,6 +268,7 @@ export default function Admin() {
       supabase.rpc("admin_member_status"),
       supabase.rpc("admin_invoice_info"),
       supabase.rpc("admin_network_entries"),
+      supabase.rpc("admin_member_profiles"),
     ]);
     if (ov.error || mem.error || ul.error || tp.error) {
       setDenied(true);
@@ -246,7 +297,9 @@ export default function Admin() {
     }
     // 人脈明細（SQL 沒跑時不擋整頁）
     if (!ne.error && Array.isArray(ne.data)) {
-      setDetails(groupDetails(ne.data as AdminEntry[]));
+      const grouped = groupDetails(ne.data as AdminEntry[]);
+      // 會員基本資料函式還沒建（SQL 沒跑）時，清單只列有案件的會員
+      setDetails(!mp.error && Array.isArray(mp.data) ? mergeMembers(mp.data as AdminProfile[], grouped) : grouped);
       setDetailsReady(true);
     }
     setLoading(false);
@@ -556,7 +609,8 @@ export default function Admin() {
               <div className="bg-white rounded-2xl border border-gray-100 p-4 shadow-sm">
                 <div className="flex items-center justify-between mb-1">
                   <div className="text-sm font-semibold text-gray-900">
-                    會員人脈明細（共 {details.reduce((n, m) => n + m.seekCount + m.offerCount, 0).toLocaleString()} 筆）
+                    會員資料與人脈明細（{details.length} 位，共{" "}
+                    {details.reduce((n, m) => n + m.seekCount + m.offerCount, 0).toLocaleString()} 筆）
                   </div>
                   {details.length > 0 && (
                     <button onClick={downloadDetails} className="text-xs text-purple-600 underline">
@@ -565,43 +619,82 @@ export default function Admin() {
                   )}
                 </div>
                 <p className="text-[11px] text-gray-400 mb-3">
-                  一筆明細 = 一個縣市 × 一個產業 × 一個部門 × 一個層級。填「不限」的項目以全部選項計（縣市 22、產業 9、部門 13、層級 4）
+                  從下拉清單選一位會員，看他的基本資料、建立的案件與展開明細。一筆明細 = 一個縣市 × 一個產業 × 一個部門 × 一個層級，填「不限」的項目以全部選項計（縣市 22、產業 9、部門 13、層級 4）
                 </p>
                 {details.length === 0 ? (
-                  <p className="text-xs text-gray-400">還沒有任何會員登錄人脈</p>
+                  <p className="text-xs text-gray-400">還沒有任何會員</p>
                 ) : (
-                  <div className="space-y-2">
-                    {details.map((m) => {
-                      const isOpen = openDetail === m.profile_id;
+                  <div className="space-y-3">
+                    <select
+                      value={openDetail || ""}
+                      onChange={(e) => {
+                        setOpenDetail(e.target.value || null);
+                        setDetailShown(DETAIL_PAGE);
+                      }}
+                      className="w-full px-3 py-2.5 rounded-xl border border-gray-200 bg-white text-sm text-gray-900 focus:border-purple-600 outline-none"
+                    >
+                      <option value="">請選擇會員（共 {details.length} 位）</option>
+                      {details.map((m) => (
+                        <option key={m.profile_id} value={m.profile_id}>
+                          {m.name}
+                          {m.company ? `・${m.company}` : ""}
+                          {`（找 ${m.seekCount.toLocaleString()}／介紹 ${m.offerCount.toLocaleString()}）`}
+                          {m.is_active ? "" : "［已停用］"}
+                        </option>
+                      ))}
+                    </select>
+                    {details
+                      .filter((m) => m.profile_id === openDetail)
+                      .map((m) => {
+                      const isOpen = true;
                       const total = m.seekCount + m.offerCount;
-                      const rows = isOpen ? sliceRows(m.entries, 0, detailShown) : [];
+                      const rows = sliceRows(m.entries, 0, detailShown);
                       return (
                         <div key={m.profile_id} className="border border-gray-100 rounded-xl overflow-hidden">
-                          <button
-                            onClick={() => {
-                              setOpenDetail(isOpen ? null : m.profile_id);
-                              setDetailShown(DETAIL_PAGE);
-                            }}
-                            className="w-full text-left p-3 flex items-center justify-between gap-2"
-                          >
-                            <div className="min-w-0">
-                              <div className="text-sm font-medium text-gray-900 truncate">
-                                {m.name}
-                                {m.company && <span className="text-gray-400 font-normal ml-1">・{m.company}</span>}
-                                {!m.is_active && (
-                                  <span className="ml-2 text-[10px] bg-gray-200 text-gray-500 px-1.5 py-0.5 rounded">
-                                    已停用
-                                  </span>
-                                )}
-                              </div>
-                              <div className="text-xs text-gray-500 mt-0.5">
-                                <span className="text-gold-900">找人脈 {m.seekCount.toLocaleString()} 筆</span>
-                                <span className="mx-1 text-gray-300">|</span>
-                                <span className="text-purple-600">介紹人脈 {m.offerCount.toLocaleString()} 筆</span>
-                              </div>
+                          {/* 基本資料 */}
+                          <div className="p-3 text-xs space-y-1 leading-relaxed">
+                            <div className="text-sm font-semibold text-gray-900">
+                              {m.name}
+                              {!m.is_active && (
+                                <span className="ml-2 text-[10px] bg-gray-200 text-gray-500 px-1.5 py-0.5 rounded font-normal">
+                                  已停用
+                                </span>
+                              )}
                             </div>
-                            <span className="text-xs text-gray-400 shrink-0">{isOpen ? "收合" : "展開"}</span>
-                          </button>
+                            <div>
+                              <span className="text-gray-400">公司：</span>
+                              {m.company || "未填"}
+                            </div>
+                            {roleText(m.role) && (
+                              <div>
+                                <span className="text-gray-400">身份：</span>
+                                {roleText(m.role)}
+                              </div>
+                            )}
+                            <div>
+                              <span className="text-gray-400">Email：</span>
+                              {m.email || "未綁帳號"}
+                            </div>
+                            {m.line_id !== undefined && (
+                              <div>
+                                <span className="text-gray-400">LINE ID：</span>
+                                {m.line_id || "未填"}
+                              </div>
+                            )}
+                            {m.bio && (
+                              <div>
+                                <span className="text-gray-400">自我介紹：</span>
+                                {m.bio}
+                              </div>
+                            )}
+                            <div className="text-gray-500 pt-1">
+                              {m.created_at ? `${fmtDate(m.created_at)} 註冊・` : ""}
+                              {typeof m.points === "number" ? `${m.points} 點・` : ""}
+                              <span className="text-gold-900">找人脈 {m.seekCount.toLocaleString()} 筆</span>
+                              <span className="mx-1 text-gray-300">|</span>
+                              <span className="text-purple-600">介紹人脈 {m.offerCount.toLocaleString()} 筆</span>
+                            </div>
+                          </div>
                           {isOpen && (
                             <div className="border-t border-gray-100 bg-gray-50">
                               {/* 會員實際建立的案件（他在表單上填的樣子） */}
@@ -609,6 +702,9 @@ export default function Admin() {
                                 <div className="text-[11px] font-semibold text-gray-500">
                                   會員建立的案件（{m.entries.length} 筆）
                                 </div>
+                                {m.entries.length === 0 && (
+                                  <p className="text-xs text-gray-400">這位會員還沒有建立任何案件，不會出現在別人的媒合名單裡</p>
+                                )}
                                 {m.entries.map((e, i) => (
                                   <div key={i} className="bg-white border border-gray-100 rounded-lg p-2.5 text-xs">
                                     <div className="flex items-center justify-between mb-1.5">

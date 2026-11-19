@@ -330,11 +330,8 @@ export default function Onboarding() {
 
   // 步驟序列：編輯模式只改基本資料（人脈案件在會員專區另外管理）；
   // 註冊時依「是否要填介紹人脈」決定要不要走介紹側的四步
-  const steps: StepKey[] = editMode
-    ? EDIT_STEPS
-    : data.hasOffer
-    ? [...BASE_STEPS, ...OFFER_STEPS, ...FINAL_STEPS]
-    : [...BASE_STEPS, ...FINAL_STEPS];
+  // 介紹人脈是必填：註冊一定會走介紹側的四步
+  const steps: StepKey[] = editMode ? EDIT_STEPS : [...BASE_STEPS, ...OFFER_STEPS, ...FINAL_STEPS];
 
   const step = steps[stepIndex];
   const totalSteps = steps.length;
@@ -363,7 +360,9 @@ export default function Onboarding() {
 
   // 把表單資料整理成要存進 profiles 的欄位
   // （舊的單筆條件欄位照存一份，正式的媒合條件是建檔後另外寫進人脈案件表）
-  function buildPayload(d: OnboardingData) {
+  function buildPayload(raw: OnboardingData) {
+    // 介紹人脈必填，舊草稿裡若還記著「跳過」也一律當作有填
+    const d: OnboardingData = { ...raw, hasOffer: true };
     const seekDepartments = mergedDepartments(d.seek);
     const offerDepartments = d.hasOffer ? mergedDepartments(d.offer) : [];
     return {
@@ -420,7 +419,7 @@ export default function Onboarding() {
     // 媒合條件寫進人脈案件表：找人脈一筆，有填介紹人脈再一筆
     try {
       await supabase.rpc("save_entry", { p: sideToPayload("seek", d.seek) });
-      if (d.hasOffer) await supabase.rpc("save_entry", { p: sideToPayload("offer", d.offer) });
+      await supabase.rpc("save_entry", { p: sideToPayload("offer", d.offer) });
     } catch {}
 
     // Google 登入的人，把 Google 大頭照帶進來（失敗不影響建檔）
@@ -858,35 +857,22 @@ export default function Onboarding() {
         {step === "offer_intro" && (
           <div>
             <h1 className="text-2xl font-bold text-gray-900 mb-1">介紹人脈：你能介紹誰？</h1>
-            <p className="text-sm text-gray-500 mb-6">
-              這段完全自由，不確定或暫時沒有都可以跳過。之後在會員專區可以隨時新增好幾筆
+            <p className="text-sm text-gray-500 mb-4">
+              接下來四步，說明你認識哪一類的關鍵人脈。不用寫對方的名字，選產業、地區、部門、層級就好
             </p>
-            <div className="space-y-3">
-              <button
-                onClick={() => {
-                  setData((p) => ({ ...p, hasOffer: true }));
-                  goNext();
-                }}
-                className={`w-full text-left p-4 rounded-xl border ${
-                  data.hasOffer ? "border-purple-600 bg-purple-100" : "border-gray-200 bg-white hover:border-purple-400"
-                }`}
-              >
-                <div className="font-semibold text-gray-900">好，我要填</div>
-                <div className="text-sm text-gray-500">例：我認識半導體廠的採購課長</div>
-              </button>
-              <button
-                onClick={() => {
-                  setData((p) => ({ ...p, hasOffer: false }));
-                  goNext();
-                }}
-                className={`w-full text-left p-4 rounded-xl border ${
-                  !data.hasOffer && editMode ? "border-purple-600 bg-purple-100" : "border-gray-200 bg-white hover:border-purple-400"
-                }`}
-              >
-                <div className="font-semibold text-gray-900">跳過，之後再填</div>
-                <div className="text-sm text-gray-500">先找人脈就好，暫時沒有可以介紹的</div>
-              </button>
+            <div className="bg-gold-50 border border-gold-100 rounded-xl p-4 text-sm text-gray-700 leading-relaxed mb-5">
+              ExKey 是靠「你想找的，剛好有人能介紹」在媒合。別人名單上的符合度，比的就是你填的介紹人脈；沒填的話，別人看不到你的符合度，你也很難被找到。
+              <div className="text-xs text-gray-500 mt-2">不確定的項目都可以選「不限」，之後在會員專區隨時能改、能再加好幾筆</div>
             </div>
+            <button
+              onClick={() => {
+                setData((p) => ({ ...p, hasOffer: true }));
+                goNext();
+              }}
+              className="w-full bg-gold-600 text-purple-900 font-semibold py-3.5 rounded-xl shadow-sm"
+            >
+              開始填介紹人脈 →
+            </button>
           </div>
         )}
 
@@ -1023,7 +1009,7 @@ export default function Onboarding() {
                       找人脈：{data.seek.industries.length === 0 ? "不限產業" : `${data.seek.industries.length} 個產業`}
                     </span>
                     <span className="text-xs bg-purple-100 text-purple-900 px-2 py-1 rounded">
-                      {data.hasOffer ? "已填一筆介紹人脈" : "尚未填介紹人脈"}
+                      已填一筆介紹人脈
                     </span>
                   </>
                 )}

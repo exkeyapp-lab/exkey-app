@@ -252,9 +252,19 @@ export default function Member() {
             </button>
           </div>
           {list.length === 0 ? (
-            <p className="text-xs text-gray-400">
-              {isSeek ? "還沒有找人脈的案件，新增一筆系統才能幫你媒合" : "還沒有介紹人脈的案件"}
-            </p>
+            isSeek ? (
+              <p className="text-xs text-gray-400">還沒有找人脈的案件，新增一筆系統才能幫你媒合</p>
+            ) : (
+              <button
+                onClick={() => router.push("/entry?kind=offer")}
+                className="w-full text-left bg-gold-50 border border-gold-100 rounded-xl p-3"
+              >
+                <div className="text-xs font-semibold text-gold-900">你還沒有填介紹人脈</div>
+                <div className="text-[11px] text-gray-600 mt-1 leading-relaxed">
+                  別人名單上的符合度，比的是你的介紹人脈。沒填的話別人看不到你的符合度，很難被找到。點這裡補一筆
+                </div>
+              </button>
+            )
           ) : (
             <div className="space-y-2">
               {list.map((e) => (

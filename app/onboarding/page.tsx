@@ -330,8 +330,12 @@ export default function Onboarding() {
 
   // 步驟序列：編輯模式只改基本資料（人脈案件在會員專區另外管理）；
   // 註冊時依「是否要填介紹人脈」決定要不要走介紹側的四步
-  // 介紹人脈是必填：註冊一定會走介紹側的四步
-  const steps: StepKey[] = editMode ? EDIT_STEPS : [...BASE_STEPS, ...OFFER_STEPS, ...FINAL_STEPS];
+  // 找人脈、介紹人脈填其中一種就能媒合，所以介紹人脈可以先跳過
+  const steps: StepKey[] = editMode
+    ? EDIT_STEPS
+    : data.hasOffer
+    ? [...BASE_STEPS, ...OFFER_STEPS, ...FINAL_STEPS]
+    : [...BASE_STEPS, ...FINAL_STEPS];
 
   const step = steps[stepIndex];
   const totalSteps = steps.length;
@@ -360,9 +364,7 @@ export default function Onboarding() {
 
   // 把表單資料整理成要存進 profiles 的欄位
   // （舊的單筆條件欄位照存一份，正式的媒合條件是建檔後另外寫進人脈案件表）
-  function buildPayload(raw: OnboardingData) {
-    // 介紹人脈必填，舊草稿裡若還記著「跳過」也一律當作有填
-    const d: OnboardingData = { ...raw, hasOffer: true };
+  function buildPayload(d: OnboardingData) {
     const seekDepartments = mergedDepartments(d.seek);
     const offerDepartments = d.hasOffer ? mergedDepartments(d.offer) : [];
     return {
@@ -419,7 +421,7 @@ export default function Onboarding() {
     // 媒合條件寫進人脈案件表：找人脈一筆，有填介紹人脈再一筆
     try {
       await supabase.rpc("save_entry", { p: sideToPayload("seek", d.seek) });
-      await supabase.rpc("save_entry", { p: sideToPayload("offer", d.offer) });
+      if (d.hasOffer) await supabase.rpc("save_entry", { p: sideToPayload("offer", d.offer) });
     } catch {}
 
     // Google 登入的人，把 Google 大頭照帶進來（失敗不影響建檔）
@@ -858,21 +860,34 @@ export default function Onboarding() {
           <div>
             <h1 className="text-2xl font-bold text-gray-900 mb-1">介紹人脈：你能介紹誰？</h1>
             <p className="text-sm text-gray-500 mb-4">
-              接下來四步，說明你認識哪一類的關鍵人脈。不用寫對方的名字，選產業、地區、部門、層級就好
+              說明你認識哪一類的關鍵人脈。不用寫對方的名字，選產業、地區、部門、層級就好
             </p>
             <div className="bg-gold-50 border border-gold-100 rounded-xl p-4 text-sm text-gray-700 leading-relaxed mb-5">
-              ExKey 是靠「你想找的，剛好有人能介紹」在媒合。別人名單上的符合度，比的就是你填的介紹人脈；沒填的話，別人看不到你的符合度，你也很難被找到。
-              <div className="text-xs text-gray-500 mt-2">不確定的項目都可以選「不限」，之後在會員專區隨時能改、能再加好幾筆</div>
+              有填介紹人脈，正在找這類人脈的會員就會連到你，你被找到的機會多一個方向。
+              <div className="text-xs text-gray-500 mt-2">
+                只填找人脈也能媒合，這一段可以先跳過，之後在會員專區隨時能補、能加好幾筆
+              </div>
             </div>
-            <button
-              onClick={() => {
-                setData((p) => ({ ...p, hasOffer: true }));
-                goNext();
-              }}
-              className="w-full bg-gold-600 text-purple-900 font-semibold py-3.5 rounded-xl shadow-sm"
-            >
-              開始填介紹人脈 →
-            </button>
+            <div className="space-y-3">
+              <button
+                onClick={() => {
+                  setData((p) => ({ ...p, hasOffer: true }));
+                  goNext();
+                }}
+                className="w-full bg-gold-600 text-purple-900 font-semibold py-3.5 rounded-xl shadow-sm"
+              >
+                好，填介紹人脈 →
+              </button>
+              <button
+                onClick={() => {
+                  setData((p) => ({ ...p, hasOffer: false }));
+                  goNext();
+                }}
+                className="w-full border border-gray-200 bg-white text-gray-600 font-medium py-3 rounded-xl"
+              >
+                先跳過，之後再填
+              </button>
+            </div>
           </div>
         )}
 
@@ -1009,7 +1024,7 @@ export default function Onboarding() {
                       找人脈：{data.seek.industries.length === 0 ? "不限產業" : `${data.seek.industries.length} 個產業`}
                     </span>
                     <span className="text-xs bg-purple-100 text-purple-900 px-2 py-1 rounded">
-                      已填一筆介紹人脈
+                      {data.hasOffer ? "已填一筆介紹人脈" : "介紹人脈之後再填"}
                     </span>
                   </>
                 )}

@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import Link from "next/link";
 import { createClient } from "@/lib/supabase";
 import NotificationBell from "../NotificationBell";
+import { entryAxes, entryCount, sliceRows } from "@/lib/match";
 import { levelLabel, PUBLIC_PROFILE_COLUMNS, ENTRY_COLUMNS, type PublicProfile, type NetworkEntry } from "@/lib/types";
 
 const SITE_URL = "https://exkey-app.vercel.app";
@@ -129,6 +130,9 @@ export default function Member() {
   const [referral, setReferral] = useState<ReferralInfo | null>(null);
   const [copied, setCopied] = useState<"code" | "link" | null>(null);
   const [entries, setEntries] = useState<NetworkEntry[]>([]);
+  // 目前展開看明細的那一筆案件，以及已顯示的筆數
+  const [openEntry, setOpenEntry] = useState<string | null>(null);
+  const [entryShown, setEntryShown] = useState(30);
   const [inviteFallback, setInviteFallback] = useState<string | null>(null);
   const [myUnlocks, setMyUnlocks] = useState<UnlockedRow[]>([]);
   const [finders, setFinders] = useState<FinderRow[]>([]);
@@ -235,6 +239,7 @@ export default function Member() {
   function EntryList({ kind }: { kind: "seek" | "offer" }) {
     const list = entries.filter((e) => e.kind === kind);
     const isSeek = kind === "seek";
+    const total = list.reduce((n, e) => n + entryCount(e), 0);
     return (
       <div className="flex gap-3">
         <div className={`w-1 rounded-full shrink-0 ${isSeek ? "bg-gold-600" : "bg-purple-600"}`} />
@@ -242,7 +247,7 @@ export default function Member() {
           <div className="flex items-center justify-between mb-1.5">
             <div className={`text-[11px] font-semibold ${isSeek ? "text-gold-900" : "text-purple-600"}`}>
               {isSeek ? "找人脈" : "介紹人脈"}
-              <span className="text-gray-400 font-normal ml-1">{list.length} 筆</span>
+              <span className="text-gray-400 font-normal ml-1">{total.toLocaleString()} 筆</span>
             </div>
             <button
               onClick={() => router.push(`/entry?kind=${kind}`)}
@@ -252,32 +257,66 @@ export default function Member() {
             </button>
           </div>
           {list.length === 0 ? (
-            isSeek ? (
-              <p className="text-xs text-gray-400">還沒有找人脈的案件，新增一筆系統才能幫你媒合</p>
-            ) : (
-              <button
-                onClick={() => router.push("/entry?kind=offer")}
-                className="w-full text-left bg-gold-50 border border-gold-100 rounded-xl p-3"
-              >
-                <div className="text-xs font-semibold text-gold-900">你還沒有填介紹人脈</div>
-                <div className="text-[11px] text-gray-600 mt-1 leading-relaxed">
-                  別人名單上的符合度，比的是你的介紹人脈。沒填的話別人看不到你的符合度，很難被找到。點這裡補一筆
-                </div>
-              </button>
-            )
+            <p className="text-xs text-gray-400 leading-relaxed">
+              {isSeek
+                ? "還沒有找人脈。填了之後，能介紹這類人脈的會員就會出現在你的媒合名單"
+                : "還沒有介紹人脈。填了之後，正在找這類人脈的會員就會出現在你的媒合名單"}
+            </p>
           ) : (
             <div className="space-y-2">
-              {list.map((e) => (
-                <button
-                  key={e.id}
-                  onClick={() => router.push(`/entry?id=${e.id}`)}
-                  className="w-full text-left bg-purple-50/60 hover:bg-purple-50 rounded-xl p-2.5 transition"
-                >
-                  <EntryTags e={e} />
-                  {e.note && <p className="text-xs text-gray-600 mt-1.5 leading-relaxed">「{e.note}」</p>}
-                  <div className="text-[10px] text-gray-400 mt-1">點一下修改或刪除</div>
-                </button>
-              ))}
+              {list.map((e) => {
+                const count = entryCount(e);
+                const isOpen = openEntry === e.id;
+                const rows = isOpen ? sliceRows([entryAxes(e)], 0, entryShown) : [];
+                return (
+                  <div key={e.id} className="bg-purple-50/60 rounded-xl p-2.5">
+                    <EntryTags e={e} />
+                    {e.note && <p className="text-xs text-gray-600 mt-1.5 leading-relaxed">「{e.note}」</p>}
+                    <div className="flex items-center justify-between mt-2">
+                      <span className="text-[11px] text-gray-500">
+                        共 <span className="font-semibold text-purple-900">{count.toLocaleString()}</span> 筆
+                      </span>
+                      <span className="flex gap-3">
+                        <button
+                          onClick={() => {
+                            setOpenEntry(isOpen ? null : e.id);
+                            setEntryShown(30);
+                          }}
+                          className="text-[11px] text-purple-600 underline"
+                        >
+                          {isOpen ? "收合" : "一筆一筆看"}
+                        </button>
+                        <button
+                          onClick={() => router.push(`/entry?id=${e.id}`)}
+                          className="text-[11px] text-purple-600 underline"
+                        >
+                          修改
+                        </button>
+                      </span>
+                    </div>
+                    {isOpen && (
+                      <div className="mt-2 bg-white rounded-lg p-2">
+                        <div className="space-y-1">
+                          {rows.map((r, i) => (
+                            <div key={i} className="text-xs text-gray-700 leading-relaxed">
+                              <span className="text-gray-400 mr-1.5">{i + 1}.</span>
+                              {r.region}・{r.industry}・{r.department}・{r.level}
+                            </div>
+                          ))}
+                        </div>
+                        {entryShown < count && (
+                          <button
+                            onClick={() => setEntryShown((n) => n + 100)}
+                            className="mt-2 text-[11px] text-purple-600 underline"
+                          >
+                            再顯示 {Math.min(100, count - entryShown).toLocaleString()} 筆（共 {count.toLocaleString()} 筆）
+                          </button>
+                        )}
+                      </div>
+                    )}
+                  </div>
+                );
+              })}
             </div>
           )}
         </div>
@@ -359,10 +398,12 @@ export default function Member() {
             <div className="bg-white rounded-2xl border border-purple-100 p-4 shadow-sm">
               <div className="flex items-center justify-between mb-1">
                 <div className="text-sm font-bold text-purple-900">我的人脈案件</div>
-                <span className="text-xs text-gray-400">{entries.length} 筆</span>
+                <span className="text-xs text-gray-400">
+                  {entries.reduce((n, e) => n + entryCount(e), 0).toLocaleString()} 筆
+                </span>
               </div>
-              <p className="text-[11px] text-gray-400 mb-4">
-                系統依這些案件自動媒合。兩種案件都沒有的話，你不會出現在別人的名單裡
+              <p className="text-[11px] text-gray-400 mb-4 leading-relaxed">
+                一筆 = 一個縣市 × 一個產業 × 一個部門 × 一個層級，沒選的項目算全部。找人脈、介紹人脈填其中一種就能媒合；兩種都沒有的話，你不會出現在別人的名單裡
               </p>
               <div className="space-y-4">
                 <EntryList kind="seek" />

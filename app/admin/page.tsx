@@ -4,7 +4,8 @@ import { useState, useEffect } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
 import { createClient } from "@/lib/supabase";
-import { levelLabel, REGIONS, INDUSTRIES, DEPARTMENTS, JOB_LEVELS } from "@/lib/types";
+import { type NetworkEntry } from "@/lib/types";
+import { entryCount, entrySummary, matchAll, totalCount } from "@/lib/match";
 
 interface DailyCount {
   day: string;
@@ -53,7 +54,7 @@ interface ReferralRow {
   awarded: boolean;
 }
 
-// 後台人脈明細：資料庫回來的一筆案件
+// 後台人脈資料：資料庫回來的一筆案件
 interface AdminEntry {
   profile_id: string;
   name: string | null;
@@ -69,44 +70,6 @@ interface AdminEntry {
   note: string | null;
   created_at: string;
 }
-// 展開後的一筆明細：一個縣市 × 一個產業 × 一個部門 × 一個層級
-interface DetailRow {
-  kind: "seek" | "offer";
-  region: string;
-  industry: string;
-  department: string;
-  level: string;
-  note: string;
-}
-// 一筆案件展開前的四組清單（不限 = 該項的全部選項）
-interface EntryAxes {
-  kind: "seek" | "offer";
-  regions: string[];
-  industries: string[];
-  departments: string[];
-  levels: string[];
-  note: string;
-  count: number;
-  // 會員實際填的內容（沒選就是不限），給後台對照用
-  raw: { regions: string[]; industries: string[]; departments: string[]; level: number };
-  created_at: string;
-}
-interface MemberDetail {
-  profile_id: string;
-  name: string;
-  company: string;
-  email: string;
-  is_active: boolean;
-  entries: EntryAxes[];
-  seekCount: number;
-  offerCount: number;
-  // 基本資料（下拉清單選到這位會員時顯示；舊函式沒給的欄位會是空的）
-  bio?: string | null;
-  role?: string | null;
-  line_id?: string | null;
-  points?: number | null;
-  created_at?: string | null;
-}
 // 後台會員基本資料：資料庫回來的一筆
 interface AdminProfile {
   profile_id: string;
@@ -120,118 +83,106 @@ interface AdminProfile {
   points: number | null;
   created_at: string;
 }
+// 和某一位會員連上的筆數
+interface PartnerCount {
+  profile_id: string;
+  name: string;
+  toHim: number; // 別人能介紹他要找的
+  fromHim: number; // 他能介紹別人要找的
+}
+// 下拉清單裡的一位會員
+interface MemberDetail {
+  profile_id: string;
+  name: string;
+  company: string;
+  email: string;
+  is_active: boolean;
+  entries: NetworkEntry[];
+  seekCount: number; // 找人脈展開後的筆數
+  offerCount: number; // 介紹人脈展開後的筆數
+  partners: PartnerCount[]; // 和哪些會員連上、各幾筆
+  matchedTotal: number; // 連上的總筆數
+  bio?: string | null;
+  role?: string | null;
+  line_id?: string | null;
+  points?: number | null;
+  created_at?: string | null;
+}
 
 function roleText(r: string | null | undefined): string {
   return r === "sales" ? "業務" : r === "vendor" ? "廠商" : r === "both" ? "業務兼廠商" : "";
 }
 
-// 把「所有會員的基本資料」和「有案件的會員明細」併成一份清單，沒填案件的會員也列出來
-function mergeMembers(profiles: AdminProfile[], withEntries: MemberDetail[]): MemberDetail[] {
-  const byId = new Map(withEntries.map((m) => [m.profile_id, m]));
-  const out: MemberDetail[] = profiles.map((p) => {
-    const d = byId.get(p.profile_id);
-    byId.delete(p.profile_id);
-    return {
-      profile_id: p.profile_id,
-      name: p.name || "（未命名）",
-      company: p.company || "",
-      email: p.email || "",
-      is_active: p.is_active,
-      entries: d ? d.entries : [],
-      seekCount: d ? d.seekCount : 0,
-      offerCount: d ? d.offerCount : 0,
-      bio: p.bio,
-      role: p.role,
-      line_id: p.line_id,
-      points: p.points,
-      created_at: p.created_at,
-    };
-  });
-  // 基本資料函式沒涵蓋到的（理論上不會有）照舊列在最後
-  byId.forEach((m) => out.push(m));
-  return out;
-}
-
-const ALL_LEVELS = JOB_LEVELS.map((l) => l.label);
-
-// 一筆案件 = 縣市 × 產業 × 部門 × 層級。例：20 個縣市、2 個產業、3 個部門、1 個層級 = 120 筆
-// 某一項填「不限」就是該項全部選項都算：縣市 22、產業 9、部門 13、層級 4
-function axesOf(e: AdminEntry): EntryAxes {
-  const regions = e.regions && e.regions.length > 0 ? e.regions : REGIONS;
-  const industries = e.industries && e.industries.length > 0 ? e.industries : INDUSTRIES;
-  const departments = e.departments && e.departments.length > 0 ? e.departments : DEPARTMENTS;
-  const levels = e.level && e.level > 0 ? [levelLabel(e.level)] : ALL_LEVELS;
+function toEntry(e: AdminEntry): NetworkEntry {
   return {
+    id: e.entry_id,
+    profile_id: e.profile_id,
     kind: e.kind,
-    regions,
-    industries,
-    departments,
-    levels,
-    note: e.note || "",
-    count: regions.length * industries.length * departments.length * levels.length,
-    raw: {
-      regions: e.regions || [],
-      industries: e.industries || [],
-      departments: e.departments || [],
-      level: e.level || 0,
-    },
+    industries: e.industries || [],
+    regions: e.regions || [],
+    departments: e.departments || [],
+    level: e.level || 0,
+    note: e.note,
     created_at: e.created_at,
   };
 }
 
-// 取出某位會員展開後的第 from ～ from+limit 筆（筆數可能上萬，不一次全部生出來）
-function sliceRows(entries: EntryAxes[], from: number, limit: number): DetailRow[] {
-  const out: DetailRow[] = [];
-  let skipped = 0;
-  for (const e of entries) {
-    if (skipped + e.count <= from) {
-      skipped += e.count;
-      continue;
-    }
-    for (const region of e.regions)
-      for (const industry of e.industries)
-        for (const department of e.departments)
-          for (const level of e.levels) {
-            if (skipped < from) {
-              skipped++;
-              continue;
-            }
-            if (out.length >= limit) return out;
-            out.push({ kind: e.kind, region, industry, department, level, note: e.note });
-          }
-  }
-  return out;
-}
-
-function groupDetails(list: AdminEntry[]): MemberDetail[] {
+// 把案件依會員分組，算出每位會員自己的筆數，以及和其他「媒合中」會員連上的筆數
+function buildMembers(list: AdminEntry[], profiles: AdminProfile[] | null): MemberDetail[] {
   const map = new Map<string, MemberDetail>();
+  const blank = (id: string, name: string | null, company: string | null, email: string | null, active: boolean): MemberDetail => ({
+    profile_id: id,
+    name: name || "（未命名）",
+    company: company || "",
+    email: email || "",
+    is_active: active,
+    entries: [],
+    seekCount: 0,
+    offerCount: 0,
+    partners: [],
+    matchedTotal: 0,
+  });
+
+  // 有基本資料函式時，沒填案件的會員也列出來
+  (profiles || []).forEach((p) => {
+    const m = blank(p.profile_id, p.name, p.company, p.email, p.is_active);
+    m.bio = p.bio;
+    m.role = p.role;
+    m.line_id = p.line_id;
+    m.points = p.points;
+    m.created_at = p.created_at;
+    map.set(p.profile_id, m);
+  });
   list.forEach((e) => {
     let m = map.get(e.profile_id);
     if (!m) {
-      m = {
-        profile_id: e.profile_id,
-        name: e.name || "（未命名）",
-        company: e.company || "",
-        email: e.email || "",
-        is_active: e.is_active,
-        entries: [],
-        seekCount: 0,
-        offerCount: 0,
-      };
+      m = blank(e.profile_id, e.name, e.company, e.email, e.is_active);
       map.set(e.profile_id, m);
     }
-    const ax = axesOf(e);
-    m.entries.push(ax);
-    if (ax.kind === "seek") m.seekCount += ax.count;
-    else m.offerCount += ax.count;
+    const entry = toEntry(e);
+    m.entries.push(entry);
+    if (entry.kind === "seek") m.seekCount += entryCount(entry);
+    else m.offerCount += entryCount(entry);
   });
-  return Array.from(map.values());
-}
 
-const DETAIL_PAGE = 100;
-
-function csvCell(v: string): string {
-  return /[",\n]/.test(v) ? `"${v.replace(/"/g, '""')}"` : v;
+  const all = Array.from(map.values());
+  // 媒合只算媒合中的會員（已停用的不會出現在任何人的名單裡）
+  const active = all.filter((m) => m.is_active && m.entries.length > 0);
+  active.forEach((m) => {
+    const mySeeks = m.entries.filter((e) => e.kind === "seek");
+    const myOffers = m.entries.filter((e) => e.kind === "offer");
+    active.forEach((o) => {
+      if (o.profile_id === m.profile_id) return;
+      const toHim = totalCount(matchAll(mySeeks, o.entries.filter((e) => e.kind === "offer")));
+      const fromHim = totalCount(matchAll(o.entries.filter((e) => e.kind === "seek"), myOffers));
+      if (toHim + fromHim > 0) {
+        m.partners.push({ profile_id: o.profile_id, name: o.name, toHim, fromHim });
+        m.matchedTotal += toHim + fromHim;
+      }
+    });
+    m.partners.sort((a, b) => b.toHim + b.fromHim - (a.toHim + a.fromHim));
+  });
+  return all;
 }
 
 function fmtDate(iso: string): string {
@@ -256,7 +207,6 @@ export default function Admin() {
   const [details, setDetails] = useState<MemberDetail[]>([]);
   const [openDetail, setOpenDetail] = useState<string | null>(null);
   const [detailsReady, setDetailsReady] = useState(false);
-  const [detailShown, setDetailShown] = useState(DETAIL_PAGE);
 
   async function loadAll() {
     const [ov, mem, ul, tp, rf, st, iv, ne, mp] = await Promise.all([
@@ -297,38 +247,13 @@ export default function Admin() {
     }
     // 人脈明細（SQL 沒跑時不擋整頁）
     if (!ne.error && Array.isArray(ne.data)) {
-      const grouped = groupDetails(ne.data as AdminEntry[]);
       // 會員基本資料函式還沒建（SQL 沒跑）時，清單只列有案件的會員
-      setDetails(!mp.error && Array.isArray(mp.data) ? mergeMembers(mp.data as AdminProfile[], grouped) : grouped);
+      setDetails(
+        buildMembers(ne.data as AdminEntry[], !mp.error && Array.isArray(mp.data) ? (mp.data as AdminProfile[]) : null)
+      );
       setDetailsReady(true);
     }
     setLoading(false);
-  }
-
-  // 把全部明細下載成 CSV（Excel 可直接開）。筆數多時會有幾 MB，屬正常
-  function downloadDetails() {
-    const lines = [["會員", "公司", "Email", "狀態", "類型", "縣市", "產業", "部門", "層級", "說明"].join(",")];
-    details.forEach((m) => {
-      const head = [m.name, m.company, m.email, m.is_active ? "媒合中" : "已停用"].map(csvCell).join(",");
-      sliceRows(m.entries, 0, Number.MAX_SAFE_INTEGER).forEach((r) =>
-        lines.push(
-          head +
-            "," +
-            [r.kind === "seek" ? "找人脈" : "介紹人脈", r.region, r.industry, r.department, r.level, r.note]
-              .map(csvCell)
-              .join(",")
-        )
-      );
-    });
-    const blob = new Blob(["\ufeff" + lines.join("\r\n")], { type: "text/csv;charset=utf-8" });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement("a");
-    a.href = url;
-    a.download = `ExKey人脈明細-${new Date().toISOString().slice(0, 10)}.csv`;
-    document.body.appendChild(a);
-    a.click();
-    document.body.removeChild(a);
-    URL.revokeObjectURL(url);
   }
 
   useEffect(() => {
@@ -604,22 +529,12 @@ export default function Admin() {
               )}
             </div>
 
-            {/* 會員人脈明細：每筆案件依 縣市 × 產業 × 部門 × 層級 展開 */}
+            {/* 會員資料與媒合筆數：下拉清單選會員 */}
             {detailsReady && (
               <div className="bg-white rounded-2xl border border-gray-100 p-4 shadow-sm">
-                <div className="flex items-center justify-between mb-1">
-                  <div className="text-sm font-semibold text-gray-900">
-                    會員資料與人脈明細（{details.length} 位，共{" "}
-                    {details.reduce((n, m) => n + m.seekCount + m.offerCount, 0).toLocaleString()} 筆）
-                  </div>
-                  {details.length > 0 && (
-                    <button onClick={downloadDetails} className="text-xs text-purple-600 underline">
-                      下載 CSV
-                    </button>
-                  )}
-                </div>
-                <p className="text-[11px] text-gray-400 mb-3">
-                  從下拉清單選一位會員，看他的基本資料、建立的案件與展開明細。一筆明細 = 一個縣市 × 一個產業 × 一個部門 × 一個層級，填「不限」的項目以全部選項計（縣市 22、產業 9、部門 13、層級 4）
+                <div className="text-sm font-semibold text-gray-900 mb-1">會員資料與媒合筆數（{details.length} 位）</div>
+                <p className="text-[11px] text-gray-400 mb-3 leading-relaxed">
+                  從下拉清單選一位會員，看他的基本資料、填了幾筆、和其他會員連上幾筆。一筆 = 一個縣市 × 一個產業 × 一個部門 × 一個層級，四項都對得上才算連上
                 </p>
                 {details.length === 0 ? (
                   <p className="text-xs text-gray-400">還沒有任何會員</p>
@@ -627,10 +542,7 @@ export default function Admin() {
                   <div className="space-y-3">
                     <select
                       value={openDetail || ""}
-                      onChange={(e) => {
-                        setOpenDetail(e.target.value || null);
-                        setDetailShown(DETAIL_PAGE);
-                      }}
+                      onChange={(e) => setOpenDetail(e.target.value || null)}
                       className="w-full px-3 py-2.5 rounded-xl border border-gray-200 bg-white text-sm text-gray-900 focus:border-purple-600 outline-none"
                     >
                       <option value="">請選擇會員（共 {details.length} 位）</option>
@@ -638,18 +550,14 @@ export default function Admin() {
                         <option key={m.profile_id} value={m.profile_id}>
                           {m.name}
                           {m.company ? `・${m.company}` : ""}
-                          {`（找 ${m.seekCount.toLocaleString()}／介紹 ${m.offerCount.toLocaleString()}）`}
+                          {`（連上 ${m.matchedTotal.toLocaleString()} 筆）`}
                           {m.is_active ? "" : "［已停用］"}
                         </option>
                       ))}
                     </select>
                     {details
                       .filter((m) => m.profile_id === openDetail)
-                      .map((m) => {
-                      const isOpen = true;
-                      const total = m.seekCount + m.offerCount;
-                      const rows = sliceRows(m.entries, 0, detailShown);
-                      return (
+                      .map((m) => (
                         <div key={m.profile_id} className="border border-gray-100 rounded-xl overflow-hidden">
                           {/* 基本資料 */}
                           <div className="p-3 text-xs space-y-1 leading-relaxed">
@@ -688,115 +596,79 @@ export default function Admin() {
                               </div>
                             )}
                             <div className="text-gray-500 pt-1">
-                              {m.created_at ? `${fmtDate(m.created_at)} 註冊・` : ""}
-                              {typeof m.points === "number" ? `${m.points} 點・` : ""}
-                              <span className="text-gold-900">找人脈 {m.seekCount.toLocaleString()} 筆</span>
-                              <span className="mx-1 text-gray-300">|</span>
-                              <span className="text-purple-600">介紹人脈 {m.offerCount.toLocaleString()} 筆</span>
+                              {m.created_at ? `${fmtDate(m.created_at)} 註冊` : ""}
+                              {typeof m.points === "number" ? `・${m.points} 點` : ""}
                             </div>
                           </div>
-                          {isOpen && (
-                            <div className="border-t border-gray-100 bg-gray-50">
-                              {/* 會員實際建立的案件（他在表單上填的樣子） */}
-                              <div className="p-3 space-y-2">
-                                <div className="text-[11px] font-semibold text-gray-500">
-                                  會員建立的案件（{m.entries.length} 筆）
-                                </div>
-                                {m.entries.length === 0 && (
-                                  <p className="text-xs text-gray-400">這位會員還沒有建立任何案件，不會出現在別人的媒合名單裡</p>
-                                )}
-                                {m.entries.map((e, i) => (
-                                  <div key={i} className="bg-white border border-gray-100 rounded-lg p-2.5 text-xs">
-                                    <div className="flex items-center justify-between mb-1.5">
-                                      <span
-                                        className={`font-semibold ${
-                                          e.kind === "seek" ? "text-gold-900" : "text-purple-600"
-                                        }`}
-                                      >
-                                        {e.kind === "seek" ? "找人脈" : "介紹人脈"}
-                                      </span>
-                                      <span className="text-[10px] text-gray-400">
-                                        {fmtDate(e.created_at)} 建立・展開為 {e.count.toLocaleString()} 筆
-                                      </span>
-                                    </div>
-                                    <div className="space-y-0.5 text-gray-700 leading-relaxed">
-                                      <div>
-                                        <span className="text-gray-400">縣市：</span>
-                                        {e.raw.regions.length > 0 ? e.raw.regions.join("、") : "不限"}
-                                      </div>
-                                      <div>
-                                        <span className="text-gray-400">產業：</span>
-                                        {e.raw.industries.length > 0 ? e.raw.industries.join("、") : "不限"}
-                                      </div>
-                                      <div>
-                                        <span className="text-gray-400">部門：</span>
-                                        {e.raw.departments.length > 0 ? e.raw.departments.join("、") : "不限"}
-                                      </div>
-                                      <div>
-                                        <span className="text-gray-400">層級：</span>
-                                        {e.raw.level > 0 ? levelLabel(e.raw.level) : "不限"}
-                                      </div>
-                                      {e.note && (
-                                        <div>
-                                          <span className="text-gray-400">說明：</span>
-                                          {e.note}
-                                        </div>
-                                      )}
-                                    </div>
-                                  </div>
-                                ))}
-                                <div className="text-[11px] font-semibold text-gray-500 pt-1">展開明細</div>
+
+                          {/* 筆數 */}
+                          <div className="border-t border-gray-100 bg-gray-50 p-3">
+                            <div className="grid grid-cols-3 gap-2 text-center">
+                              <div className="bg-white rounded-lg py-2">
+                                <div className="text-base font-bold text-gold-900">{m.seekCount.toLocaleString()}</div>
+                                <div className="text-[10px] text-gray-400 mt-0.5">找人脈筆數</div>
                               </div>
-                              <div className="overflow-x-auto border-t border-gray-100">
-                                <table className="w-full text-xs">
-                                  <thead>
-                                    <tr className="text-left text-gray-500">
-                                      <th className="px-3 py-2 font-medium whitespace-nowrap">類型</th>
-                                      <th className="px-2 py-2 font-medium whitespace-nowrap">縣市</th>
-                                      <th className="px-2 py-2 font-medium whitespace-nowrap">產業</th>
-                                      <th className="px-2 py-2 font-medium whitespace-nowrap">部門</th>
-                                      <th className="px-2 py-2 font-medium whitespace-nowrap">層級</th>
-                                      <th className="px-2 py-2 font-medium whitespace-nowrap">說明</th>
-                                    </tr>
-                                  </thead>
-                                  <tbody>
-                                    {rows.map((r, i) => (
-                                      <tr key={i} className="border-t border-gray-100 align-top">
-                                        <td
-                                          className={`px-3 py-1.5 whitespace-nowrap font-medium ${
-                                            r.kind === "seek" ? "text-gold-900" : "text-purple-600"
-                                          }`}
-                                        >
-                                          {r.kind === "seek" ? "找" : "介紹"}
-                                        </td>
-                                        <td className="px-2 py-1.5 whitespace-nowrap text-gray-900">{r.region}</td>
-                                        <td className="px-2 py-1.5 whitespace-nowrap text-gray-900">{r.industry}</td>
-                                        <td className="px-2 py-1.5 whitespace-nowrap text-gray-900">{r.department}</td>
-                                        <td className="px-2 py-1.5 whitespace-nowrap text-gray-900">{r.level}</td>
-                                        <td className="px-2 py-1.5 text-gray-500 min-w-[120px]">{r.note}</td>
-                                      </tr>
-                                    ))}
-                                  </tbody>
-                                </table>
+                              <div className="bg-white rounded-lg py-2">
+                                <div className="text-base font-bold text-purple-600">{m.offerCount.toLocaleString()}</div>
+                                <div className="text-[10px] text-gray-400 mt-0.5">介紹人脈筆數</div>
                               </div>
-                              <div className="px-3 py-2 border-t border-gray-100 flex items-center justify-between text-[11px] text-gray-500">
-                                <span>
-                                  顯示前 {Math.min(detailShown, total).toLocaleString()} 筆，共 {total.toLocaleString()} 筆
-                                </span>
-                                {detailShown < total && (
-                                  <button
-                                    onClick={() => setDetailShown((n) => n + DETAIL_PAGE * 5)}
-                                    className="text-purple-600 underline"
-                                  >
-                                    再顯示 500 筆
-                                  </button>
-                                )}
+                              <div className="bg-white rounded-lg py-2">
+                                <div className="text-base font-bold text-purple-900">{m.matchedTotal.toLocaleString()}</div>
+                                <div className="text-[10px] text-gray-400 mt-0.5">媒合連上筆數</div>
                               </div>
                             </div>
-                          )}
+
+                            {/* 和誰連上、各幾筆 */}
+                            <div className="mt-3">
+                              <div className="text-[11px] font-semibold text-gray-500 mb-1">
+                                連上的會員（{m.partners.length} 位）
+                              </div>
+                              {m.partners.length === 0 ? (
+                                <p className="text-xs text-gray-400">
+                                  {!m.is_active
+                                    ? "已停用的會員不參與媒合"
+                                    : m.entries.length === 0
+                                    ? "這位會員還沒有建立任何案件，不會出現在別人的媒合名單裡"
+                                    : "目前沒有和任何會員連上"}
+                                </p>
+                              ) : (
+                                <div className="space-y-1">
+                                  {m.partners.map((pt) => (
+                                    <div key={pt.profile_id} className="flex items-center justify-between text-xs bg-white rounded-lg px-2.5 py-1.5">
+                                      <span className="text-gray-900 truncate">{pt.name}</span>
+                                      <span className="text-gray-500 shrink-0 ml-2">
+                                        共 <span className="font-semibold text-purple-900">{(pt.toHim + pt.fromHim).toLocaleString()}</span> 筆
+                                        <span className="text-gray-400">
+                                          （對方能介紹 {pt.toHim.toLocaleString()}／對方在找 {pt.fromHim.toLocaleString()}）
+                                        </span>
+                                      </span>
+                                    </div>
+                                  ))}
+                                </div>
+                              )}
+                            </div>
+
+                            {/* 他填了什麼（一筆案件一行，不展開） */}
+                            {m.entries.length > 0 && (
+                              <div className="mt-3">
+                                <div className="text-[11px] font-semibold text-gray-500 mb-1">他填的案件（{m.entries.length} 筆）</div>
+                                <div className="space-y-1">
+                                  {m.entries.map((e) => (
+                                    <div key={e.id} className="text-xs bg-white rounded-lg px-2.5 py-1.5 leading-relaxed">
+                                      <span className={`font-semibold mr-1.5 ${e.kind === "seek" ? "text-gold-900" : "text-purple-600"}`}>
+                                        {e.kind === "seek" ? "找" : "介紹"}
+                                      </span>
+                                      <span className="text-gray-700">{entrySummary(e)}</span>
+                                      <span className="text-gray-400 ml-1.5">{entryCount(e).toLocaleString()} 筆</span>
+                                      {e.note && <div className="text-gray-500 mt-0.5">「{e.note}」</div>}
+                                    </div>
+                                  ))}
+                                </div>
+                              </div>
+                            )}
+                          </div>
                         </div>
-                      );
-                    })}
+                      ))}
                   </div>
                 )}
               </div>

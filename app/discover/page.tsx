@@ -5,103 +5,27 @@ import { useRouter } from "next/navigation";
 import Link from "next/link";
 import { createClient } from "@/lib/supabase";
 import NotificationBell from "../NotificationBell";
-import { levelLabel, PUBLIC_PROFILE_COLUMNS, ENTRY_COLUMNS, type PublicProfile, type NetworkEntry } from "@/lib/types";
+import { PUBLIC_PROFILE_COLUMNS, ENTRY_COLUMNS, type PublicProfile, type NetworkEntry } from "@/lib/types";
+import { matchAll, totalCount, sliceRows, type Axes } from "@/lib/match";
 
-// ==================== 媒合計分 ====================
-// 「不限」規則：任何一邊是不限（空陣列、層級 0）就視為符合，拿該維度滿分。
-// 四個維度滿分合計 80：產業 20、地區 15、部門 15、層級 30。
-
-interface Cond {
-  industries: string[];
-  regions: string[];
-  departments: string[];
-  level: number;
-}
-const FULL_SCORE = 80;
-
-function condOf(e: NetworkEntry): Cond {
-  return {
-    industries: e.industries || [],
-    regions: e.regions || [],
-    departments: e.departments || [],
-    level: e.level || 0,
-  };
-}
-
-// 單一維度：有一邊不限就滿分；都有填就看有沒有交集
-function dimensionScore(seekList: string[], offerList: string[], weight: number): number {
-  if (seekList.length === 0 || offerList.length === 0) return weight;
-  return offerList.some((v) => seekList.includes(v)) ? weight : 0;
-}
-
-// 層級：有一邊不限就滿分；都有填時達到門檻滿分，差一階仍給部分分數
-function levelScore(seekLevel: number, offerLevel: number): number {
-  if (!seekLevel || !offerLevel) return 30;
-  const gap = offerLevel - seekLevel;
-  if (gap >= 0) return 30;
-  if (gap === -1) return 18;
-  if (gap === -2) return 10;
-  return 5;
-}
-
-function pairScore(seek: Cond, offer: Cond): number {
-  return (
-    dimensionScore(seek.industries, offer.industries, 20) +
-    dimensionScore(seek.regions, offer.regions, 15) +
-    dimensionScore(seek.departments, offer.departments, 15) +
-    levelScore(seek.level, offer.level)
-  );
-}
-
-// 列出實際對上的維度（不限也算對上）
-function matchReasons(seek: Cond, offer: Cond): string[] {
-  const out: string[] = [];
-  if (dimensionScore(seek.industries, offer.industries, 1) > 0) out.push("產業");
-  if (dimensionScore(seek.regions, offer.regions, 1) > 0) out.push("地區");
-  if (dimensionScore(seek.departments, offer.departments, 1) > 0) out.push("部門");
-  const ls = levelScore(seek.level, offer.level);
-  if (ls === 30) out.push("層級");
-  else if (ls === 18) out.push("層級接近");
-  return out;
-}
-
-// 在「我的案件 × 對方案件」所有組合裡挑分數最高的一組
-function bestPair(
-  seeks: NetworkEntry[],
-  offers: NetworkEntry[]
-): { score: number; seek: NetworkEntry | null; offer: NetworkEntry | null } {
-  let best = { score: -1, seek: null as NetworkEntry | null, offer: null as NetworkEntry | null };
-  for (const s of seeks) {
-    for (const o of offers) {
-      const sc = pairScore(condOf(s), condOf(o));
-      if (sc > best.score) best = { score: sc, seek: s, offer: o };
-    }
-  }
-  return best;
-}
-
-// 對方填不限的維度，畫面上顯示「我這邊的值」，對方看起來就像是正好符合我的條件
-function shownList(theirs: string[], mine: string[]): string[] {
-  return theirs.length > 0 ? theirs : mine;
-}
-function shownLevel(theirs: number, mine: number): number {
-  return theirs > 0 ? theirs : mine;
-}
+// ==================== 媒合 ====================
+// 沒有符合度，只有連上幾筆。兩個方向都算：
+//   toMe   = 我的找人脈 × 對方的介紹人脈（他能介紹我要找的）
+//   fromMe = 對方的找人脈 × 我的介紹人脈（他在找我能介紹的）
+// 只要其中一邊有連上就會出現在名單裡，所以只填找人脈或只填介紹人脈的人都找得到人。
 
 type Recommendation = PublicProfile & {
-  score: number;
+  toMe: Axes[];
+  fromMe: Axes[];
+  toMeCount: number;
+  fromMeCount: number;
   mutual: boolean;
-  percent: number;
-  reasons: string[];
-  // 對方「介紹人脈」那筆（配到我的找人脈），以及我用來配的那筆
-  theirOffer: NetworkEntry | null;
-  mySeek: NetworkEntry | null;
-  // 對方「找人脈」那筆（配到我的介紹人脈；我沒填介紹人脈時取對方第一筆），以及我那筆
-  theirSeek: NetworkEntry | null;
-  myOffer: NetworkEntry | null;
+  notes: string[];
 };
 
-// 每張卡片的解鎖狀態
+const LIST_LIMIT = 30;
+const ROW_PAGE = 20;
+
 type UnlockState =
   | { stage: "idle" }
   | { stage: "confirm" }
@@ -186,97 +110,64 @@ function InviteTextPanel({ text, onClose }: { text: string; onClose: () => void 
 
 // ==================== 視覺元件 ====================
 
-// 配對度圓環：把百分比變成一眼可讀的圖形
-function MatchRing({ percent }: { percent: number }) {
-  const r = 20;
-  const circumference = 2 * Math.PI * r;
-  const offset = circumference * (1 - Math.min(Math.max(percent, 0), 100) / 100);
-  return (
-    <div className="relative w-14 h-14 shrink-0">
-      <svg width="56" height="56" viewBox="0 0 56 56" className="-rotate-90">
-        <circle cx="28" cy="28" r={r} fill="none" stroke="#EEE7F7" strokeWidth="5" />
-        <circle
-          cx="28"
-          cy="28"
-          r={r}
-          fill="none"
-          stroke={percent >= 60 ? "#D4AF37" : "#6B4FB8"}
-          strokeWidth="5"
-          strokeLinecap="round"
-          strokeDasharray={circumference}
-          strokeDashoffset={offset}
-        />
-      </svg>
-      <div className="absolute inset-0 flex items-center justify-center">
-        <span className="text-base font-bold text-purple-900 leading-none">
-          {percent}
-          <span className="text-[10px] text-gray-400 font-medium">%</span>
-        </span>
-      </div>
-    </div>
-  );
-}
-
-// 把一組條件整理成標籤清單，層級標籤加重顯示。
-// theirs = 對方那筆案件；mine = 我拿來配的那筆（對方填不限的維度改顯示我的值）
-function conditionChips(theirs: NetworkEntry | null, mine: NetworkEntry | null): { text: string; strong: boolean }[] {
-  if (!theirs) return [];
-  const out: { text: string; strong: boolean }[] = [];
-  const m = mine ? condOf(mine) : { industries: [], regions: [], departments: [], level: 0 };
-  const t = condOf(theirs);
-  shownList(t.industries, m.industries).slice(0, 3).forEach((v) => out.push({ text: v, strong: false }));
-  shownList(t.regions, m.regions).slice(0, 2).forEach((v) => out.push({ text: v, strong: false }));
-  shownList(t.departments, m.departments).slice(0, 2).forEach((v) => out.push({ text: v, strong: false }));
-  const lv = shownLevel(t.level, m.level);
-  if (lv > 0) out.push({ text: levelLabel(lv), strong: true });
-  return out;
-}
-
-// 條件區塊：左側色條 + 標題 + 標籤群，兩個區塊用顏色區分方向
-function ConditionBlock({
+// 一個方向連上的筆數，點開可以一筆一筆看
+function MatchBlock({
   title,
   tone,
-  chips,
+  list,
+  count,
   emptyText,
-  note,
 }: {
   title: string;
   tone: "offer" | "seek";
-  chips: { text: string; strong: boolean }[];
+  list: Axes[];
+  count: number;
   emptyText: string;
-  note?: string | null;
 }) {
+  const [open, setOpen] = useState(false);
+  const [shown, setShown] = useState(ROW_PAGE);
   const bar = tone === "offer" ? "bg-purple-600" : "bg-gold-600";
-  const label = tone === "offer" ? "text-purple-600" : "text-gold-900";
-  const chipPlain =
-    tone === "offer"
-      ? "bg-purple-50 text-purple-900 border-purple-100"
-      : "bg-gold-50 text-gold-900 border-gold-100";
-  const chipStrong =
-    tone === "offer" ? "bg-purple-600 text-white border-purple-600" : "bg-gold-600 text-purple-900 border-gold-600";
-
+  const titleColor = tone === "offer" ? "text-purple-600" : "text-gold-900";
+  const rows = open ? sliceRows(list, 0, shown) : [];
   return (
     <div className="flex gap-3">
       <div className={`w-1 rounded-full shrink-0 ${bar}`} />
       <div className="flex-1 min-w-0">
-        <div className={`text-[11px] font-semibold tracking-wide mb-1.5 ${label}`}>{title}</div>
-        {chips.length === 0 ? (
-          <div className="text-xs text-gray-400">{emptyText}</div>
+        <div className="flex items-baseline justify-between gap-2">
+          <div className={`text-[11px] font-semibold ${titleColor}`}>{title}</div>
+          {count > 0 && (
+            <button onClick={() => setOpen((v) => !v)} className="text-[11px] text-gray-500 underline shrink-0">
+              {open ? "收合" : "看明細"}
+            </button>
+          )}
+        </div>
+        {count > 0 ? (
+          <div className="text-sm text-gray-900 mt-0.5">
+            連上 <span className="text-lg font-bold text-purple-900">{count.toLocaleString()}</span> 筆
+          </div>
         ) : (
-          <div className="flex flex-wrap gap-1.5">
-            {chips.map((c, i) => (
-              <span
-                key={`${title}-${c.text}-${i}`}
-                className={`text-xs px-2.5 py-1 rounded-lg border font-medium ${
-                  c.strong ? chipStrong : chipPlain
-                }`}
+          <div className="text-xs text-gray-400 mt-1">{emptyText}</div>
+        )}
+        {open && (
+          <div className="mt-2 bg-purple-50/60 rounded-xl p-2.5">
+            <div className="space-y-1">
+              {rows.map((r, i) => (
+                <div key={i} className="text-xs text-gray-700 leading-relaxed">
+                  <span className="text-gray-400 mr-1.5">{i + 1}.</span>
+                  {r.region}・{r.industry}・{r.department}・{r.level}
+                </div>
+              ))}
+            </div>
+            {shown < count && (
+              <button
+                onClick={() => setShown((n) => n + ROW_PAGE * 5)}
+                className="mt-2 text-[11px] text-purple-600 underline"
               >
-                {c.text}
-              </span>
-            ))}
+                再顯示 {Math.min(100, count - shown).toLocaleString()} 筆（共 {count.toLocaleString()} 筆）
+              </button>
+            )}
           </div>
         )}
-        {note && <div className="text-xs text-gray-500 mt-2 leading-relaxed">「{note}」</div>}
       </div>
     </div>
   );
@@ -318,7 +209,7 @@ export default function Discover() {
   const [showRefBanner, setShowRefBanner] = useState(false);
   const [copiedLink, setCopiedLink] = useState(false);
   const [inviteFallback, setInviteFallback] = useState<string | null>(null);
-  const [hasSeek, setHasSeek] = useState(true);
+  const [hasEntries, setHasEntries] = useState(true);
 
   async function refreshWallet() {
     const { data } = await supabase.rpc("get_my_wallet");
@@ -381,9 +272,9 @@ export default function Discover() {
       const myEntries = byProfile.get(me.id) || [];
       const mySeeks = myEntries.filter((e) => e.kind === "seek");
       const myOffers = myEntries.filter((e) => e.kind === "offer");
-      setHasSeek(mySeeks.length > 0);
-      if (mySeeks.length === 0) {
-        // 沒有找人脈案件就沒有比對條件，不列名單
+      setHasEntries(myEntries.length > 0);
+      if (myEntries.length === 0) {
+        // 找人脈、介紹人脈都沒有，就沒有東西可以比對
         setRecommendations([]);
         setLoading(false);
         return;
@@ -393,35 +284,39 @@ export default function Discover() {
         .filter((p) => p.id !== me.id && p.user_id !== uid)
         .map((p) => {
           const theirs = byProfile.get(p.id) || [];
+          if (theirs.length === 0) return null;
           const theirOffers = theirs.filter((e) => e.kind === "offer");
           const theirSeeks = theirs.filter((e) => e.kind === "seek");
-          // 一筆案件都沒有的人不出現在任何人的名單裡
-          if (theirs.length === 0) return null;
 
-          // 主方向：我的找人脈 × 對方的介紹人脈
-          const primary = bestPair(mySeeks, theirOffers);
-          // 反方向：對方的找人脈 × 我的介紹人脈（都有才算「超級伙伴」）
-          const secondary = bestPair(theirSeeks, myOffers);
+          const toMe = matchAll(mySeeks, theirOffers);
+          const fromMe = matchAll(theirSeeks, myOffers);
+          const toMeCount = totalCount(toMe);
+          const fromMeCount = totalCount(fromMe);
+          // 兩個方向都沒連上的人不列出來
+          if (toMeCount + fromMeCount === 0) return null;
 
-          const primaryScore = Math.max(primary.score, 0);
-          const secondaryScore = Math.max(secondary.score, 0);
-          const seekToShow = secondary.seek || theirSeeks[0] || null;
+          const notes = Array.from(
+            new Set(theirs.map((e) => (e.note || "").trim()).filter((n) => n.length > 0))
+          ).slice(0, 3);
 
           return {
             ...p,
-            score: primaryScore + secondaryScore,
-            mutual: primary.score >= 40 && secondary.score >= 40,
-            percent: Math.round((primaryScore / FULL_SCORE) * 100),
-            reasons: primary.seek && primary.offer ? matchReasons(condOf(primary.seek), condOf(primary.offer)) : [],
-            theirOffer: primary.offer,
-            mySeek: primary.seek,
-            theirSeek: seekToShow,
-            myOffer: secondary.offer,
+            toMe,
+            fromMe,
+            toMeCount,
+            fromMeCount,
+            mutual: toMeCount > 0 && fromMeCount > 0,
+            notes,
           } as Recommendation;
         })
         .filter((r): r is Recommendation => r !== null)
-        .sort((a, b) => b.score - a.score)
-        .slice(0, 5);
+        // 兩邊都連上的（超級伙伴）排前面，再依連上的總筆數
+        .sort(
+          (a, b) =>
+            Number(b.mutual) - Number(a.mutual) ||
+            b.toMeCount + b.fromMeCount - (a.toMeCount + a.fromMeCount)
+        )
+        .slice(0, LIST_LIMIT);
 
       setRecommendations(scored);
       setLoading(false);
@@ -514,8 +409,8 @@ export default function Discover() {
             {loading
               ? "正在比對全站人脈條件..."
               : recommendations.length > 0
-              ? `依你的找人脈案件，找到 ${recommendations.length} 位關鍵人脈`
-              : "依你的找人脈案件比對"}
+              ? `和你的人脈案件連得上的有 ${recommendations.length} 位`
+              : "依你的找人脈、介紹人脈比對"}
           </p>
         </div>
 
@@ -575,26 +470,34 @@ export default function Discover() {
           </div>
         )}
 
-        {/* 沒有找人脈案件 */}
-        {!loading && !noProfile && !hasSeek && (
+        {/* 一筆案件都沒有 */}
+        {!loading && !noProfile && !hasEntries && (
           <div className="bg-white rounded-2xl border border-gold-100 p-7 shadow-sm text-center mb-4">
-            <p className="text-base font-semibold text-purple-900 mb-1">你還沒有找人脈的案件</p>
+            <p className="text-base font-semibold text-purple-900 mb-1">你還沒有任何人脈案件</p>
             <p className="text-sm text-gray-500 mb-5 leading-relaxed">
-              先新增一筆「找人脈」，說明你想認識哪一類的關鍵人脈，
+              找人脈或介紹人脈，先填其中一種就可以開始媒合。
               <br />
-              系統才有條件可以比對
+              兩種都填，連得上的人會更多
             </p>
-            <button
-              onClick={() => router.push("/entry?kind=seek")}
-              className="w-full bg-gold-600 text-purple-900 font-semibold py-3 rounded-xl"
-            >
-              新增找人脈
-            </button>
+            <div className="flex gap-2">
+              <button
+                onClick={() => router.push("/entry?kind=seek")}
+                className="flex-1 bg-gold-600 text-purple-900 font-semibold py-3 rounded-xl"
+              >
+                新增找人脈
+              </button>
+              <button
+                onClick={() => router.push("/entry?kind=offer")}
+                className="flex-1 bg-purple-600 text-white font-semibold py-3 rounded-xl"
+              >
+                新增介紹人脈
+              </button>
+            </div>
           </div>
         )}
 
-        {/* 沒有媒合結果 */}
-        {!loading && !noProfile && hasSeek && recommendations.length === 0 && (
+        {/* 沒有人連得上 */}
+        {!loading && !noProfile && hasEntries && recommendations.length === 0 && (
           <div className="bg-white rounded-2xl border border-purple-100 p-7 shadow-sm text-center">
             <div className="w-14 h-14 rounded-2xl bg-purple-100 mx-auto mb-4 flex items-center justify-center">
               <svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="#4A2D8F" strokeWidth="2" strokeLinecap="round">
@@ -602,11 +505,11 @@ export default function Discover() {
                 <path d="M20 20l-3.5-3.5" />
               </svg>
             </div>
-            <p className="text-base font-semibold text-purple-900 mb-1">目前還沒有符合的關鍵人脈</p>
+            <p className="text-base font-semibold text-purple-900 mb-1">目前還沒有連得上的關鍵人脈</p>
             <p className="text-sm text-gray-500 mb-5 leading-relaxed">
               平台還在累積人脈中。
               <br />
-              把條件放寬一些，或過幾天再回來看看
+              把案件的條件放寬（不確定的項目選不限），或多加幾筆案件
             </p>
             <button
               onClick={() => router.push("/member")}
@@ -621,9 +524,7 @@ export default function Discover() {
         <div className="space-y-4">
           {recommendations.map((p, idx) => {
             const unlock = unlocks[p.id] || { stage: "idle" };
-            const top = idx === 0 && recommendations.length > 1 && p.percent >= 50;
-            const offerChips = conditionChips(p.theirOffer, p.mySeek);
-            const seekChips = conditionChips(p.theirSeek, p.myOffer);
+            const top = idx === 0 && recommendations.length > 1;
 
             return (
               <div
@@ -664,50 +565,44 @@ export default function Discover() {
                       </div>
                     </div>
                     <div className="shrink-0 text-center">
-                      {p.theirOffer ? (
-                        <>
-                          <MatchRing percent={p.percent} />
-                          <div className="text-[10px] text-gray-400 mt-1">符合度</div>
-                        </>
-                      ) : (
-                        // 對方還沒填介紹人脈：沒有東西可以和我的找人脈比對，不顯示 0%
-                        <>
-                          <div className="w-14 h-14 rounded-full border-[5px] border-gray-100 flex items-center justify-center text-[11px] font-semibold text-gray-400">
-                            未填
-                          </div>
-                          <div className="text-[10px] text-gray-400 mt-1">介紹人脈</div>
-                        </>
-                      )}
+                      <div className="text-2xl font-bold text-purple-900 leading-none">
+                        {(p.toMeCount + p.fromMeCount).toLocaleString()}
+                      </div>
+                      <div className="text-[10px] text-gray-400 mt-1">筆連上</div>
                     </div>
                   </div>
-
-                  {/* 配對原因 */}
-                  {p.reasons.length > 0 && (
-                    <div className="mt-4 bg-purple-50 rounded-xl px-3 py-2 text-xs text-purple-600 font-medium">
-                      符合你的條件：{p.reasons.join("、")}
-                    </div>
-                  )}
 
                   {/* 自我介紹 */}
                   {p.bio && <p className="mt-4 text-sm text-gray-600 leading-relaxed">{p.bio}</p>}
 
-                  {/* 條件兩欄 */}
+                  {/* 兩個方向各連上幾筆 */}
                   <div className="mt-4 space-y-4">
-                    <ConditionBlock
-                      title="他的介紹人脈"
+                    <MatchBlock
+                      title="他能介紹你要找的"
                       tone="offer"
-                      chips={offerChips}
-                      emptyText={p.theirOffer ? "不限" : "尚未填寫，暫時無法計算符合度"}
-                      note={p.theirOffer ? p.theirOffer.note : null}
+                      list={p.toMe}
+                      count={p.toMeCount}
+                      emptyText="這個方向沒有連上"
                     />
-                    <ConditionBlock
-                      title="他的找人脈"
+                    <MatchBlock
+                      title="他在找你能介紹的"
                       tone="seek"
-                      chips={seekChips}
-                      emptyText={p.theirSeek ? "不限" : "尚未填寫"}
-                      note={p.theirSeek ? p.theirSeek.note : null}
+                      list={p.fromMe}
+                      count={p.fromMeCount}
+                      emptyText="這個方向沒有連上"
                     />
                   </div>
+
+                  {/* 對方在案件裡寫的補充說明 */}
+                  {p.notes.length > 0 && (
+                    <div className="mt-3 space-y-1">
+                      {p.notes.map((n, i) => (
+                        <p key={i} className="text-xs text-gray-500 leading-relaxed">
+                          「{n}」
+                        </p>
+                      ))}
+                    </div>
+                  )}
 
                   {/* 解鎖區 */}
                   <div className="mt-5">
@@ -824,9 +719,9 @@ export default function Discover() {
         {/* 底部說明 */}
         {!loading && recommendations.length > 0 && (
           <p className="text-center text-xs text-gray-400 mt-7 leading-relaxed">
-            符合度依你的找人脈案件計算，不代表對方的合作意願。
+            一筆 = 一個縣市 × 一個產業 × 一個部門 × 一個層級，四項都對得上才算連上。
             <br />
-            連繫過的關鍵人脈可永久免費查看。
+            連上不代表對方的合作意願。連繫過的關鍵人脈可永久免費查看。
           </p>
         )}
       </div>

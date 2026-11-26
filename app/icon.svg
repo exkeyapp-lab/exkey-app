@@ -1,14 +1,28 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64">
   <style>
-    .spark { transform-origin: 52px 12px; animation: twinkle 2.4s ease-in-out infinite; }
-    @keyframes twinkle {
-      0%, 100% { transform: scale(1); opacity: 1; }
-      50% { transform: scale(0.45); opacity: 0.35; }
+    .e { animation: e-in 5s ease-in-out infinite; }
+    .k { animation: k-in 5s ease-in-out infinite; }
+    @keyframes e-in {
+      0%, 40% { transform: translateX(0); opacity: 1; }
+      50% { transform: translateX(0); opacity: 0; }
+      51% { transform: translateX(-22px); opacity: 0; }
+      66%, 100% { transform: translateX(0); opacity: 1; }
     }
-    @media (prefers-reduced-motion: reduce) { .spark { animation: none; } }
+    @keyframes k-in {
+      0%, 40% { transform: translateX(0); opacity: 1; }
+      50% { transform: translateX(0); opacity: 0; }
+      65% { transform: translateX(-22px); opacity: 0; }
+      80%, 100% { transform: translateX(0); opacity: 1; }
+    }
+    @media (prefers-reduced-motion: reduce) { .e, .k { animation: none; } }
   </style>
+  <clipPath id="box"><rect width="64" height="64" rx="14"/></clipPath>
+  <clipPath id="right"><rect x="28" y="0" width="36" height="64"/></clipPath>
   <rect width="64" height="64" rx="14" fill="#4A2D8F"/>
-  <path d="M12 22h14v5H18v5h7v5h-7v5h8v5H12z" fill="#E6C157"/>
-  <path d="M30 22h6v10l8-10h7L41.5 33.5 52 47h-7.5L37 37l-1 1.2V47h-6z" fill="#FFFFFF"/>
-  <path class="spark" d="M52 5l1.8 5.2L59 12l-5.2 1.8L52 19l-1.8-5.2L45 12l5.2-1.8z" fill="#E6C157"/>
+  <g clip-path="url(#box)">
+    <path class="e" d="M12 19h14v5H18v5h7v5h-7v5h8v5H12z" fill="#E6C157"/>
+    <g clip-path="url(#right)">
+      <path class="k" d="M30 19h6v10l8-10h7L41.5 30.5 52 44h-7.5L37 34l-1 1.2V44h-6z" fill="#FFFFFF"/>
+    </g>
+  </g>
 </svg>
